@@ -159,21 +159,21 @@ function renderGranInputs() {
   const el = document.getElementById("granInputs");
   if (state.gran === "day") {
     el.innerHTML = `<label class="field">選擇日期
-      <input type="date" id="qDate" min="2023-01-01" max="2024-12-31" value="2024-01-01">
+      <input type="date" id="qDate" min="2020-01-01" max="2024-12-31" value="2024-01-01">
     </label>`;
   } else if (state.gran === "month") {
     el.innerHTML = `<label class="field">選擇年份
-      <select id="qYear"><option value="2024">2024</option><option value="2023">2023</option></select>
+      <select id="qYear"><option value="2024">2024</option><option value="2023">2023</option><option value="2022">2022</option><option value="2021">2021</option><option value="2020">2020</option></select>
     </label>
     <label class="field">選擇月份
       <select id="qMonth">${MONTH_NAMES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("")}</select>
     </label>`;
   } else {
     el.innerHTML = `<label class="field">開始日期
-      <input type="date" id="qStart" min="2023-01-01" max="2024-12-31" value="2024-01-01">
+      <input type="date" id="qStart" min="2020-01-01" max="2024-12-31" value="2024-01-01">
     </label>
     <label class="field">結束日期
-      <input type="date" id="qEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31">
+      <input type="date" id="qEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31">
     </label>
     <label class="field">颱風快選<select class="typhoon-pick" data-start="qStart" data-end="qEnd"><option value="">不套用</option></select></label>`;
   }

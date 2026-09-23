@@ -563,17 +563,17 @@ function exportMapCsv() {
 function renderMapGranInputs() {
   const el = document.getElementById("mapGranInputs");
   if (state.mapgran === "day") {
-    el.innerHTML = `<label class="field">選擇日期<input type="date" id="mDate" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>`;
+    el.innerHTML = `<label class="field">選擇日期<input type="date" id="mDate" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>`;
   } else if (state.mapgran === "month") {
     el.innerHTML = `<label class="field">選擇年份
-      <select id="mYear"><option value="2024">2024</option><option value="2023">2023</option></select>
+      <select id="mYear"><option value="2024">2024</option><option value="2023">2023</option><option value="2022">2022</option><option value="2021">2021</option><option value="2020">2020</option></select>
     </label>
     <label class="field">選擇月份
       <select id="mMonth">${MONTH_NAMES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("")}</select>
     </label>`;
   } else {
-    el.innerHTML = `<label class="field">開始日期<input type="date" id="mStart" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>
-    <label class="field">結束日期<input type="date" id="mEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31"></label>
+    el.innerHTML = `<label class="field">開始日期<input type="date" id="mStart" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>
+    <label class="field">結束日期<input type="date" id="mEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31"></label>
     <label class="field">颱風快選<select class="typhoon-pick" data-start="mStart" data-end="mEnd"><option value="">不套用</option></select></label>`;
   }
   populateTyphoonSelects();

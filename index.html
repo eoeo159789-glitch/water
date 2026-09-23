@@ -13,7 +13,7 @@
   <header class="top">
     <div>
       <h1>雨量與河川水位流量查詢系統</h1>
-      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（2023～2024年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。部分測站僅其中一年有完整資料，詳見測站資訊列。</p>
+      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（2020～2024年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。部分測站僅其中一至數年有完整資料，詳見測站資訊列。</p>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button">切換深色模式</button>
   </header>
@@ -77,16 +77,16 @@
     <!-- COMPARE MODE -->
     <div id="comparePanel" style="display:none;">
       <div class="row">
-        <label class="field">期間 A 開始<input type="date" id="aStart" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>
-        <label class="field">期間 A 結束<input type="date" id="aEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31"></label>
+        <label class="field">期間 A 開始<input type="date" id="aStart" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>
+        <label class="field">期間 A 結束<input type="date" id="aEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31"></label>
         <label class="field">颱風快選 A<select class="typhoon-pick" data-start="aStart" data-end="aEnd"><option value="">不套用</option></select></label>
       </div>
       <div class="row">
-        <label class="field">期間 B 開始<input type="date" id="bStart" min="2023-01-01" max="2024-12-31" value="2023-01-01"></label>
-        <label class="field">期間 B 結束<input type="date" id="bEnd" min="2023-01-01" max="2024-12-31" value="2023-01-31"></label>
+        <label class="field">期間 B 開始<input type="date" id="bStart" min="2020-01-01" max="2024-12-31" value="2023-01-01"></label>
+        <label class="field">期間 B 結束<input type="date" id="bEnd" min="2020-01-01" max="2024-12-31" value="2023-01-31"></label>
         <label class="field">颱風快選 B<select class="typhoon-pick" data-start="bStart" data-end="bEnd"><option value="">不套用</option></select></label>
       </div>
-      <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">提示：期間 A、B 可跨 2023／2024 年選擇，方便做「同月份跨年比較」；也可用颱風快選直接帶入該次警報期間的日期範圍。</p>
+      <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">提示：期間 A、B 可跨 2020～2024 年選擇，方便做「同月份跨年比較」或「治理前後比較」；也可用颱風快選直接帶入該次警報期間的日期範圍。</p>
       <div class="row">
         <button class="primary" id="compareBtn" type="button">比較期間 A 與 B</button>
         <button class="ghost" id="exportCompareCsvBtn" type="button">匯出 CSV</button>
@@ -116,13 +116,13 @@
 
       <div id="mapDiffInputs" style="display:none;">
         <div class="row">
-          <label class="field">期間 A 開始<input type="date" id="mAStart" min="2023-01-01" max="2024-12-31" value="2024-07-22"></label>
-          <label class="field">期間 A 結束<input type="date" id="mAEnd" min="2023-01-01" max="2024-12-31" value="2024-07-26"></label>
+          <label class="field">期間 A 開始<input type="date" id="mAStart" min="2020-01-01" max="2024-12-31" value="2024-07-22"></label>
+          <label class="field">期間 A 結束<input type="date" id="mAEnd" min="2020-01-01" max="2024-12-31" value="2024-07-26"></label>
           <label class="field">颱風快選 A<select class="typhoon-pick" data-start="mAStart" data-end="mAEnd"><option value="">不套用</option></select></label>
         </div>
         <div class="row">
-          <label class="field">期間 B 開始<input type="date" id="mBStart" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>
-          <label class="field">期間 B 結束<input type="date" id="mBEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31"></label>
+          <label class="field">期間 B 開始<input type="date" id="mBStart" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>
+          <label class="field">期間 B 結束<input type="date" id="mBEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31"></label>
           <label class="field">颱風快選 B<select class="typhoon-pick" data-start="mBStart" data-end="mBEnd"><option value="">不套用</option></select></label>
         </div>
         <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">地圖將呈現各測站「期間 A 減期間 B」之差異（雨量：總雨量差；水位／流量：平均值差）。</p>

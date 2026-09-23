@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雨量與河川水位流量查詢</title>
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div>
+      <h1>雨量與河川水位流量查詢系統</h1>
+      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（2023～2024年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。部分測站僅其中一年有完整資料，詳見測站資訊列。</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">切換深色模式</button>
+  </header>
+
+  <section class="panel">
+    <h2>1. 選擇資料類型與測站</h2>
+    <div class="row">
+      <div class="seg" id="dataTypeSeg">
+        <button data-type="rainfall" class="active">雨量 (mm)</button>
+        <button data-type="level">水位 (m)</button>
+        <button data-type="discharge">流量 (cms)</button>
+      </div>
+      <div class="seg" id="regionSeg">
+        <button data-region="all" class="active">全部區域</button>
+        <button data-region="north">北部</button>
+        <button data-region="central">中部</button>
+        <button data-region="south">南部</button>
+        <button data-region="east">東部</button>
+      </div>
+    </div>
+    <div class="row">
+      <label class="field">
+        搜尋測站名稱 / 代碼
+        <input type="text" id="stationSearch" placeholder="例如：秀巒、H041、富貴角">
+      </label>
+      <label class="field">
+        測站列表 (<span id="stationCountLabel">0</span> 站)
+        <select id="stationSelect"></select>
+      </label>
+    </div>
+    <div class="station-info" id="stationInfo"></div>
+  </section>
+
+  <section class="panel">
+    <h2>2. 查詢模式</h2>
+    <div class="row">
+      <div class="seg" id="modeSeg">
+        <button data-mode="query" class="active">單一查詢</button>
+        <button data-mode="compare">期間比較（加減）</button>
+        <button data-mode="map">空間分佈地圖</button>
+      </div>
+    </div>
+
+    <!-- QUERY MODE -->
+    <div id="queryPanel">
+      <div class="row">
+        <div class="seg" id="granSeg">
+          <button data-gran="day" class="active">單日</button>
+          <button data-gran="month">單月</button>
+          <button data-gran="range">自訂區間</button>
+        </div>
+      </div>
+      <div class="row" id="granInputs"></div>
+      <div class="row">
+        <button class="primary" id="queryBtn" type="button">查詢</button>
+        <button class="ghost" id="exportCsvBtn" type="button">匯出 CSV</button>
+      </div>
+      <div id="queryResult"></div>
+    </div>
+
+    <!-- COMPARE MODE -->
+    <div id="comparePanel" style="display:none;">
+      <div class="row">
+        <label class="field">期間 A 開始<input type="date" id="aStart" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>
+        <label class="field">期間 A 結束<input type="date" id="aEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31"></label>
+        <label class="field">颱風快選 A<select class="typhoon-pick" data-start="aStart" data-end="aEnd"><option value="">不套用</option></select></label>
+      </div>
+      <div class="row">
+        <label class="field">期間 B 開始<input type="date" id="bStart" min="2023-01-01" max="2024-12-31" value="2023-01-01"></label>
+        <label class="field">期間 B 結束<input type="date" id="bEnd" min="2023-01-01" max="2024-12-31" value="2023-01-31"></label>
+        <label class="field">颱風快選 B<select class="typhoon-pick" data-start="bStart" data-end="bEnd"><option value="">不套用</option></select></label>
+      </div>
+      <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">提示：期間 A、B 可跨 2023／2024 年選擇，方便做「同月份跨年比較」；也可用颱風快選直接帶入該次警報期間的日期範圍。</p>
+      <div class="row">
+        <button class="primary" id="compareBtn" type="button">比較期間 A 與 B</button>
+        <button class="ghost" id="exportCompareCsvBtn" type="button">匯出 CSV</button>
+      </div>
+      <div id="compareResult"></div>
+    </div>
+
+    <!-- MAP MODE -->
+    <div id="mapPanel" style="display:none;">
+      <div class="row">
+        <div class="seg" id="mapModeSeg">
+          <button data-mapmode="single" class="active">單期查詢</button>
+          <button data-mapmode="diff">期間相減（A－B）</button>
+        </div>
+      </div>
+
+      <div id="mapSingleInputs">
+        <div class="row">
+          <div class="seg" id="mapGranSeg">
+            <button data-mapgran="day" class="active">單日</button>
+            <button data-mapgran="month">單月（累計/平均）</button>
+            <button data-mapgran="range">自訂區間（累計/平均）</button>
+          </div>
+        </div>
+        <div class="row" id="mapGranInputs"></div>
+      </div>
+
+      <div id="mapDiffInputs" style="display:none;">
+        <div class="row">
+          <label class="field">期間 A 開始<input type="date" id="mAStart" min="2023-01-01" max="2024-12-31" value="2024-07-22"></label>
+          <label class="field">期間 A 結束<input type="date" id="mAEnd" min="2023-01-01" max="2024-12-31" value="2024-07-26"></label>
+          <label class="field">颱風快選 A<select class="typhoon-pick" data-start="mAStart" data-end="mAEnd"><option value="">不套用</option></select></label>
+        </div>
+        <div class="row">
+          <label class="field">期間 B 開始<input type="date" id="mBStart" min="2023-01-01" max="2024-12-31" value="2024-01-01"></label>
+          <label class="field">期間 B 結束<input type="date" id="mBEnd" min="2023-01-01" max="2024-12-31" value="2024-01-31"></label>
+          <label class="field">颱風快選 B<select class="typhoon-pick" data-start="mBStart" data-end="mBEnd"><option value="">不套用</option></select></label>
+        </div>
+        <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">地圖將呈現各測站「期間 A 減期間 B」之差異（雨量：總雨量差；水位／流量：平均值差）。</p>
+      </div>
+
+      <div class="row">
+        <button class="primary" id="mapQueryBtn" type="button">產生地圖</button>
+        <button class="ghost" id="exportMapCsvBtn" type="button">匯出 CSV</button>
+        <span class="badge" id="mapStatus"></span>
+      </div>
+      <p class="empty-note" style="padding:4px 0;text-align:left;margin:0 0 8px;" id="mapNote">
+        雨量：以反距離加權（IDW）內插繪製類似中央氣象署雨量圖的分級色塊（配色對照中央氣象署定量降水預報圖）；水位／流量為逐點量測，沿線數值不具面狀連續性，故不內插，改以測站位置＋顏色/大小標示數值。底圖、河川水系、縣市界可從地圖右上角圖層控制項開關；OpenStreetMap 電子地圖與正射影像為線上圖磚，需連線才會顯示，離線時請維持「無底圖」。
+      </p>
+
+      <details class="color-scale-editor" id="colorScaleEditor">
+        <summary>地圖色階設定（可自訂）</summary>
+        <div class="row">
+          <label class="field">最低顯示雨量 (mm)<input type="number" id="csMinThreshold" step="0.1" value="0.5" style="width:90px;"></label>
+          <button class="ghost" id="csAddRowBtn" type="button">新增級距</button>
+          <button class="ghost" id="csResetBtn" type="button">重設為中央氣象署配色</button>
+          <button class="primary" id="csApplyBtn" type="button">套用色階</button>
+        </div>
+        <div id="csRows"></div>
+        <p class="empty-note" style="padding:0;text-align:left;margin:2px 0 8px;">套用後請重新按「產生地圖」以更新目前畫面。「上限」為每一級距的雨量上限 (mm)，級距需由小到大排列。</p>
+        <div class="row">
+          <label class="field">期間相減：增加（正值）色<input type="color" id="csDivPos" value="#c80000"></label>
+          <label class="field">期間相減：減少（負值）色<input type="color" id="csDivNeg" value="#0050d2"></label>
+        </div>
+      </details>
+
+      <div id="mapCanvas"></div>
+    </div>
+  </section>
+
+  <p class="footer-note">
+    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
+  </p>
+</div>
+
+<script src="chart.umd.min.js"></script>
+<script src="leaflet.js"></script>
+<script src="topojson-client.min.js"></script>
+<script src="data.js"></script>
+<script src="taiwan.geo.js"></script>
+<script src="rivers.geo.js"></script>
+<script src="counties.geo.js"></script>
+<script src="typhoons.js"></script>
+<script src="app.js"></script>
+<script src="map.js"></script>
+</body>
+</html>

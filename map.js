@@ -10,10 +10,19 @@ let countiesLayer = null;
 let osmLayer = null;
 let photoLayer = null;
 let blankBaseLayer = null;
+let rainStationsLayer = null;    // static reference layer: all rainfall station locations
+let levelStationsLayer = null;   // static reference layer: all water-level station locations
+let dischargeStationsLayer = null; // static reference layer: all discharge station locations
 let lastHeatmapPoints = null;   // for zoom-triggered re-render (single rainfall mode)
 let lastHeatmapDiverging = null; // {maxAbs} when the last heatmap was a diverging diff map
 let lastMapRows = null;         // for CSV export
 let zoomRenderTimer = null;
+
+// live-adjustable layer opacities (0-1), changed via the opacity editor panel
+let HEATMAP_OPACITY = 0.85;
+let RIVERS_OPACITY = 0.7;
+let COUNTIES_OPACITY = 1;
+let STATION_OPACITY = 0.9;
 
 // CWA-style quantitative precipitation forecast color bins (mm), sampled from the
 // official 定量降水預報 legend the user supplied. This is the fixed reset target;
@@ -99,7 +108,7 @@ function ensureMap() {
   try {
     const riversGeo = topojson.feature(RIVERS_TOPO, RIVERS_TOPO.objects[Object.keys(RIVERS_TOPO.objects)[0]]);
     riversLayer = L.geoJSON(riversGeo, {
-      style: { color: "#2f6fb0", weight: 0.6, fillColor: "#4a90d9", fillOpacity: 0.45, opacity: 0.7 },
+      style: () => riverStyle(),
       onEachFeature: (feature, layer) => {
         const name = feature.properties && feature.properties.RIVER_NAME;
         if (name) layer.bindTooltip(name, { sticky: true });
@@ -112,7 +121,7 @@ function ensureMap() {
   try {
     const countiesGeo = topojson.feature(COUNTIES_TOPO, COUNTIES_TOPO.objects.counties);
     countiesLayer = L.geoJSON(countiesGeo, {
-      style: { color: "#5a4632", weight: 1.2, fillOpacity: 0, dashArray: "4,3" },
+      style: () => countyStyle(),
       onEachFeature: (feature, layer) => {
         const name = feature.properties && feature.properties.COUNTYNAME;
         if (name) layer.bindTooltip(name, { sticky: true });
@@ -122,6 +131,12 @@ function ensureMap() {
     console.error("county layer failed to load", e);
   }
 
+  // -- static station-location reference layers (independent of any query; always the
+  // full 雨量站/水位站/流量站 lists with coordinates) --
+  rainStationsLayer = buildStationRefLayer(RAINFALL, "rain", s => true);
+  levelStationsLayer = buildStationRefLayer(RIVER, "level", s => s.level && Object.keys(s.level).length > 0);
+  dischargeStationsLayer = buildStationRefLayer(RIVER, "discharge", s => s.discharge && Object.keys(s.discharge).length > 0);
+
   const baseLayers = {
     "無底圖（離線可用）": blankBaseLayer,
     "OpenStreetMap 電子地圖（需連線）": osmLayer,
@@ -130,7 +145,11 @@ function ensureMap() {
   const overlays = {};
   if (riversLayer) overlays["河川水系"] = riversLayer;
   if (countiesLayer) overlays["縣市界"] = countiesLayer;
+  overlays["雨量站位置"] = rainStationsLayer;
+  overlays["水位站位置"] = levelStationsLayer;
+  overlays["流量站位置"] = dischargeStationsLayer;
   L.control.layers(baseLayers, overlays, { position: "topright", collapsed: true }).addTo(leafletMap);
+  addFullscreenControl(leafletMap);
 
   leafletMap.on("baselayerchange", (e) => {
     const isBlank = e.layer === blankBaseLayer;
@@ -145,13 +164,84 @@ function ensureMap() {
     zoomRenderTimer = setTimeout(() => {
       const { dataUrl, bounds } = renderRainfallHeatmap(lastHeatmapPoints, lastHeatmapDiverging);
       if (mapImageOverlay) leafletMap.removeLayer(mapImageOverlay);
-      mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: 0.85 }).addTo(leafletMap);
+      mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(leafletMap);
       if (mapMarkersLayer) mapMarkersLayer.bringToFront();
     }, 200);
   });
 
   return leafletMap;
 }
+
+/* ---------- style helpers driven by the opacity editor ---------- */
+function riverStyle() {
+  return { color: "#2f6fb0", weight: 0.6, fillColor: "#4a90d9", fillOpacity: RIVERS_OPACITY * 0.643, opacity: RIVERS_OPACITY };
+}
+function countyStyle() {
+  return { color: "#5a4632", weight: 1.2, fillOpacity: 0, dashArray: "4,3", opacity: COUNTIES_OPACITY };
+}
+
+const STATION_REF_STYLE = {
+  rain:      { cls: "rain",      label: "雨量站" },
+  level:     { cls: "level",     label: "水位站" },
+  discharge: { cls: "discharge", label: "流量站" },
+};
+
+function buildStationRefLayer(stations, kind, filterFn) {
+  const group = L.featureGroup();
+  const meta = STATION_REF_STYLE[kind];
+  stations.forEach(s => {
+    if (s.lat === undefined || !filterFn(s)) return;
+    const icon = L.divIcon({
+      className: `station-icon ${meta.cls}`,
+      html: meta.cls === "discharge" ? '<span class="tri-shape"></span>' : "",
+      iconSize: [12, 12],
+      iconAnchor: [6, 6],
+    });
+    const m = L.marker([s.lat, s.lon], { icon, opacity: STATION_OPACITY })
+      .bindTooltip(`${meta.label}：${s.name_zh}（${s.code}）`);
+    group.addLayer(m);
+  });
+  return group;
+}
+
+/* ---------- fullscreen control (hand-rolled; no external plugin needed) ---------- */
+function addFullscreenControl(map) {
+  const FullscreenControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: function () {
+      const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-control-fullscreen");
+      const link = L.DomUtil.create("a", "leaflet-control-fullscreen-btn", container);
+      link.href = "#";
+      link.title = "全螢幕顯示地圖";
+      link.setAttribute("role", "button");
+      link.innerHTML = "⛶";
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(link, "click", (e) => {
+        L.DomEvent.preventDefault(e);
+        toggleMapFullscreen();
+      });
+      return container;
+    }
+  });
+  map.addControl(new FullscreenControl());
+}
+
+function toggleMapFullscreen() {
+  const el = document.getElementById("mapCanvas");
+  const isFull = document.fullscreenElement || document.webkitFullscreenElement;
+  if (!isFull) {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (req) req.call(el);
+  } else {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (exit) exit.call(document);
+  }
+}
+["fullscreenchange", "webkitfullscreenchange"].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 120);
+  });
+});
 
 function buildMaskCanvas(width, height, minLon, maxLon, minLat, maxLat) {
   const canvas = document.createElement("canvas");
@@ -341,12 +431,12 @@ function runMapQuery() {
     lastHeatmapPoints = points;
     lastHeatmapDiverging = null;
     const { dataUrl, bounds } = renderRainfallHeatmap(points, null);
-    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: 0.85 }).addTo(map);
+    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(map);
 
     mapMarkersLayer = L.featureGroup();
     points.forEach(p => {
       const m = L.circleMarker([p.lat, p.lon], {
-        radius: 3, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: 0.9
+        radius: 3, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: STATION_OPACITY
       }).bindTooltip(`${p.name}：${fmt(p.value, 1)} mm`);
       mapMarkersLayer.addLayer(m);
     });
@@ -373,7 +463,7 @@ function runMapQuery() {
       const t = maxV > minV ? (p.value - minV) / (maxV - minV) : 0.5;
       const m = L.circleMarker([p.lat, p.lon], {
         radius: 5 + t * 7, color: "#333", weight: 1,
-        fillColor: sequentialColor(t, hue), fillOpacity: 0.85
+        fillColor: sequentialColor(t, hue), fillOpacity: STATION_OPACITY
       }).bindTooltip(`${p.name}：${fmt(p.value, 2)} ${UNIT[key]}`);
       mapMarkersLayer.addLayer(m);
     });
@@ -413,12 +503,12 @@ function runMapDiffQuery() {
     lastHeatmapPoints = points;
     lastHeatmapDiverging = { maxAbs };
     const { dataUrl, bounds } = renderRainfallHeatmap(points, { maxAbs });
-    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: 0.85 }).addTo(map);
+    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(map);
 
     mapMarkersLayer = L.featureGroup();
     points.forEach(p => {
       const m = L.circleMarker([p.lat, p.lon], {
-        radius: 3, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: 0.9
+        radius: 3, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: STATION_OPACITY
       }).bindTooltip(`${p.name}：${p.value > 0 ? "+" : ""}${fmt(p.value, 1)} mm（A: ${fmt(p.valueA, 1)}，B: ${fmt(p.valueB, 1)}）`);
       mapMarkersLayer.addLayer(m);
     });
@@ -446,7 +536,7 @@ function runMapDiffQuery() {
       const t = Math.abs(p.value) / maxAbs;
       const m = L.circleMarker([p.lat, p.lon], {
         radius: 5 + t * 7, color: "#333", weight: 1,
-        fillColor: divergingColorStr(p.value, maxAbs), fillOpacity: 0.9
+        fillColor: divergingColorStr(p.value, maxAbs), fillOpacity: STATION_OPACITY
       }).bindTooltip(`${p.name}：${p.value > 0 ? "+" : ""}${fmt(p.value, 2)} ${UNIT[key]}（A: ${fmt(p.valueA, 2)}，B: ${fmt(p.valueB, 2)}）`);
       mapMarkersLayer.addLayer(m);
     });
@@ -612,3 +702,57 @@ function initColorScaleEditor() {
 }
 
 document.addEventListener("DOMContentLoaded", initColorScaleEditor);
+
+/* ---------- layer opacity editor ---------- */
+function pctLabel(id, v) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = Math.round(v * 100) + "%";
+}
+
+function applyHeatmapOpacity(v) {
+  HEATMAP_OPACITY = v;
+  if (mapImageOverlay) mapImageOverlay.setOpacity(v);
+  pctLabel("opRainVal", v);
+}
+function applyRiversOpacity(v) {
+  RIVERS_OPACITY = v;
+  if (riversLayer) riversLayer.setStyle(riverStyle());
+  pctLabel("opRiversVal", v);
+}
+function applyCountiesOpacity(v) {
+  COUNTIES_OPACITY = v;
+  if (countiesLayer) countiesLayer.setStyle(countyStyle());
+  pctLabel("opCountiesVal", v);
+}
+function applyStationOpacity(v) {
+  STATION_OPACITY = v;
+  if (mapMarkersLayer) mapMarkersLayer.eachLayer(m => { if (m.setStyle) m.setStyle({ fillOpacity: v }); });
+  [rainStationsLayer, levelStationsLayer, dischargeStationsLayer].forEach(layer => {
+    if (layer) layer.eachLayer(m => { if (m.setOpacity) m.setOpacity(v); });
+  });
+  pctLabel("opStationsVal", v);
+}
+
+function initOpacityEditor() {
+  const opRain = document.getElementById("opRain");
+  if (!opRain) return; // editor not present on this page
+  opRain.addEventListener("input", (e) => applyHeatmapOpacity(parseInt(e.target.value, 10) / 100));
+  document.getElementById("opRivers").addEventListener("input", (e) => applyRiversOpacity(parseInt(e.target.value, 10) / 100));
+  document.getElementById("opCounties").addEventListener("input", (e) => applyCountiesOpacity(parseInt(e.target.value, 10) / 100));
+  document.getElementById("opStations").addEventListener("input", (e) => applyStationOpacity(parseInt(e.target.value, 10) / 100));
+  pctLabel("opRainVal", HEATMAP_OPACITY);
+  pctLabel("opRiversVal", RIVERS_OPACITY);
+  pctLabel("opCountiesVal", COUNTIES_OPACITY);
+  pctLabel("opStationsVal", STATION_OPACITY);
+
+  document.getElementById("opResetBtn").addEventListener("click", () => {
+    const defaults = { opRain: 85, opRivers: 70, opCounties: 100, opStations: 90 };
+    Object.entries(defaults).forEach(([id, v]) => { document.getElementById(id).value = v; });
+    applyHeatmapOpacity(0.85);
+    applyRiversOpacity(0.7);
+    applyCountiesOpacity(1);
+    applyStationOpacity(0.9);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", initOpacityEditor);

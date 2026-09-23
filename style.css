@@ -327,6 +327,64 @@ button.ghost {
   padding: 2px 6px;
 }
 
+.op-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.op-row .op-lbl { width: 150px; flex: none; }
+.op-row input[type="range"] { flex: 1; min-width: 80px; accent-color: var(--series-1); }
+.op-row .op-val { width: 40px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+/* station reference-layer marker shapes (offline CSS-only icons, no external images) */
+.station-icon { pointer-events: auto; }
+.station-icon.rain {
+  width: 10px; height: 10px;
+  background: #2a78d6;
+  border: 1px solid #123a66;
+  border-radius: 50%;
+  margin: 1px;
+}
+.station-icon.level {
+  width: 9px; height: 9px;
+  background: #1f9e6d;
+  border: 1px solid #0f5c3f;
+  margin: 1.5px;
+}
+.station-icon.discharge { background: transparent; border: none; position: relative; }
+.station-icon.discharge .tri-shape {
+  position: absolute;
+  left: 1px; top: 1px;
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #e07b1f;
+}
+
+/* hand-rolled fullscreen control button, styled to match Leaflet's own controls */
+.leaflet-control-fullscreen-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  line-height: 1;
+  color: #333;
+  background: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+.leaflet-control-fullscreen-btn:hover { background: #f4f4f4; }
+#mapCanvas:fullscreen,
+#mapCanvas:-webkit-full-screen {
+  height: 100vh;
+  background: var(--page);
+}
+
 .legend-row {
   display: flex; gap: 16px; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px; flex-wrap: wrap;
 }

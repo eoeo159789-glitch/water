@@ -134,7 +134,7 @@
         <span class="badge" id="mapStatus"></span>
       </div>
       <p class="empty-note" style="padding:4px 0;text-align:left;margin:0 0 8px;" id="mapNote">
-        雨量：以反距離加權（IDW）內插繪製類似中央氣象署雨量圖的分級色塊（配色對照中央氣象署定量降水預報圖）；水位／流量為逐點量測，沿線數值不具面狀連續性，故不內插，改以測站位置＋顏色/大小標示數值。底圖、河川水系、縣市界可從地圖右上角圖層控制項開關；OpenStreetMap 電子地圖與正射影像為線上圖磚，需連線才會顯示，離線時請維持「無底圖」。
+        雨量：以反距離加權（IDW）內插繪製類似中央氣象署雨量圖的分級色塊（配色對照中央氣象署定量降水預報圖）；水位／流量為逐點量測，沿線數值不具面狀連續性，故不內插，改以測站位置＋顏色/大小標示數值。底圖、河川水系、縣市界、以及雨量站／水位站／流量站位置參考圖層，皆可從地圖右上角圖層控制項開關；OpenStreetMap 電子地圖與正射影像為線上圖磚，需連線才會顯示，離線時請維持「無底圖」。地圖左上角另有全螢幕按鈕，可放大檢視。
       </p>
 
       <details class="color-scale-editor" id="colorScaleEditor">
@@ -153,12 +153,40 @@
         </div>
       </details>
 
+      <details class="color-scale-editor" id="layerOpacityEditor">
+        <summary>圖層透明度設定</summary>
+        <div class="op-row">
+          <span class="op-lbl">雨量／相減內插圖層</span>
+          <input type="range" id="opRain" min="0" max="100" value="85">
+          <span class="op-val" id="opRainVal">85%</span>
+        </div>
+        <div class="op-row">
+          <span class="op-lbl">河川水系</span>
+          <input type="range" id="opRivers" min="0" max="100" value="70">
+          <span class="op-val" id="opRiversVal">70%</span>
+        </div>
+        <div class="op-row">
+          <span class="op-lbl">縣市界</span>
+          <input type="range" id="opCounties" min="0" max="100" value="100">
+          <span class="op-val" id="opCountiesVal">100%</span>
+        </div>
+        <div class="op-row">
+          <span class="op-lbl">測站標記／位置圖示</span>
+          <input type="range" id="opStations" min="0" max="100" value="90">
+          <span class="op-val" id="opStationsVal">90%</span>
+        </div>
+        <div class="row" style="margin-top:2px;">
+          <button class="ghost" id="opResetBtn" type="button">重設透明度</button>
+        </div>
+        <p class="empty-note" style="padding:0;text-align:left;margin:2px 0 0;">拖曳即時套用，不需另外按「產生地圖」。</p>
+      </details>
+
       <div id="mapCanvas"></div>
     </div>
   </section>
 
   <p class="footer-note">
-    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
+    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
   </p>
 </div>
 

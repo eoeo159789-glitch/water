@@ -9,9 +9,9 @@ let state = {
   dataType: "rainfall",
   region: "all",
   stationId: null,
-  mode: "query",
+  mode: "map",
   gran: "day",
-  mapgran: "day",
+  mapgran: "range",
   mapmode: "single",
 };
 
@@ -541,6 +541,40 @@ function populateTyphoonSelects() {
   });
 }
 
+/* ---------- mode switching ---------- */
+function applyMode() {
+  document.getElementById("queryPanel").style.display = state.mode === "query" ? "" : "none";
+  document.getElementById("comparePanel").style.display = state.mode === "compare" ? "" : "none";
+  document.getElementById("mapPanel").style.display = state.mode === "map" ? "" : "none";
+  document.getElementById("evalPanel").style.display = state.mode === "eval" ? "" : "none";
+  // the map works on the whole network: no station picker there
+  document.getElementById("stationPanel").style.display = state.mode === "map" ? "none" : "";
+  document.body.classList.toggle("mode-map", state.mode === "map");
+  if (state.mode !== "map") { tyLeaveMode(); wraStopPlay(true); }
+  if (state.mode === "eval") evOnEnter();
+  if (state.mode === "query" && !document.getElementById("queryResult").innerHTML.trim()) runQuery();
+  if (state.mode === "map") {
+    const map = ensureMap();
+    if (!document.querySelector("#mapGranInputs input, #mapGranInputs select")) renderMapGranInputs();
+    setTimeout(() => { map.invalidateSize(); }, 0);
+  }
+}
+
+// first screen: rainfall map of the most recent typhoon in the yearbook period
+async function initialMap() {
+  document.querySelectorAll("#mapGranSeg button").forEach(b => b.classList.toggle("active", b.dataset.mapgran === state.mapgran));
+  renderMapGranInputs();
+  const i = TYPHOON_PERIODS.length - 1, t = TYPHOON_PERIODS[i];
+  document.getElementById("mStart").value = t.start;
+  document.getElementById("mEnd").value = t.end;
+  const pick = document.querySelector("#mapGranInputs select.typhoon-pick");
+  if (pick) pick.value = String(i);
+  await runMapQuery();
+  const st = document.getElementById("mapStatus");
+  if (st.textContent) st.textContent = `預設顯示：${t.start.slice(0, 4)} ${t.name_zh}颱風（${t.start}～${t.end}）期間總雨量｜` + st.textContent;
+  wraUpdatePlayUi();
+}
+
 /* ---------- event wiring ---------- */
 function setSeg(segId, key, onChange) {
   document.getElementById(segId).addEventListener("click", e => {
@@ -560,19 +594,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setSeg("dataTypeSeg", "type", () => { renderStationOptions(); wraUpdatePlayUi(); });
   setSeg("regionSeg", "region", () => { renderStationOptions(); });
-  setSeg("modeSeg", "mode", () => {
-    document.getElementById("queryPanel").style.display = state.mode === "query" ? "" : "none";
-    document.getElementById("comparePanel").style.display = state.mode === "compare" ? "" : "none";
-    document.getElementById("mapPanel").style.display = state.mode === "map" ? "" : "none";
-    document.getElementById("evalPanel").style.display = state.mode === "eval" ? "" : "none";
-    if (state.mode !== "map") { tyLeaveMode(); wraStopPlay(true); }
-    if (state.mode === "eval") evOnEnter();
-    if (state.mode === "map") {
-      const map = ensureMap();
-      renderMapGranInputs();
-      setTimeout(() => { map.invalidateSize(); }, 0);
-    }
-  });
+  setSeg("modeSeg", "mode", applyMode);
   setSeg("granSeg", "gran", () => { renderGranInputs(); });
   setSeg("mapGranSeg", "mapgran", () => { renderMapGranInputs(); });
   setSeg("mapModeSeg", "mapmode", () => {
@@ -631,5 +653,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   renderGranInputs();
   renderStationOptions();
-  runQuery();
+  applyMode();
+  initialMap();
 });

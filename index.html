@@ -14,19 +14,33 @@
   <header class="top">
     <div>
       <h1>雨量與河川水位流量查詢系統</h1>
-      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（<span class="data-years">2001～2024</span>年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。各測站的資料年份不同（部分測站已撤站、改名或新設），詳見測站資訊列；逐日資料依年份分檔，查詢時才載入。地圖模式另收錄中央氣象署颱風資料庫 1958–2026 年 350 場颱風、1,067 個雨量站的逐時雨量與事件統計。</p>
+      <p>經濟部水利署《臺灣水文年報》<span class="data-years">2001～2024</span>年雨量、河川水位及流量（<span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）＋中央氣象署颱風雨量 1958–2026。</p>
+      <details class="src-details"><summary>資料來源說明</summary>
+        <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量。各測站的資料年份不同（部分測站已撤站、改名或新設），詳見測站資訊列；逐日資料依年份分檔，查詢時才載入。地圖模式另收錄中央氣象署颱風資料庫 1958–2026 年 350 場颱風、1,067 個雨量站的逐時雨量與事件統計。</p>
+      </details>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button">切換深色模式</button>
   </header>
 
-  <section class="panel">
-    <h2>1. 選擇資料類型與測站</h2>
+  <section class="panel toolbar">
     <div class="row">
+      <div class="seg" id="modeSeg">
+        <button data-mode="map" class="active">空間分佈地圖</button>
+        <button data-mode="query">單一測站查詢</button>
+        <button data-mode="compare">期間比較（加減）</button>
+        <button data-mode="eval">治理前後評估</button>
+      </div>
       <div class="seg" id="dataTypeSeg">
         <button data-type="rainfall" class="active">雨量 (mm)</button>
         <button data-type="level">水位 (m)</button>
         <button data-type="discharge">流量 (cms)</button>
       </div>
+    </div>
+  </section>
+
+  <section class="panel" id="stationPanel" style="display:none;">
+    <h2>選擇測站</h2>
+    <div class="row">
       <div class="seg" id="regionSeg">
         <button data-region="all" class="active">全部區域</button>
         <button data-region="north">北部</button>
@@ -49,19 +63,9 @@
     <details class="color-scale-editor thr-editor" id="thrEditor"></details>
   </section>
 
-  <section class="panel">
-    <h2>2. 查詢模式</h2>
-    <div class="row">
-      <div class="seg" id="modeSeg">
-        <button data-mode="query" class="active">單一查詢</button>
-        <button data-mode="compare">期間比較（加減）</button>
-        <button data-mode="map">空間分佈地圖</button>
-        <button data-mode="eval">治理前後評估</button>
-      </div>
-    </div>
-
+  <section class="panel" id="modePanel">
     <!-- QUERY MODE -->
-    <div id="queryPanel">
+    <div id="queryPanel" style="display:none;">
       <div class="row">
         <div class="seg" id="granSeg">
           <button data-gran="day" class="active">單日</button>
@@ -98,13 +102,26 @@
     </div>
 
     <!-- MAP MODE -->
-    <div id="mapPanel" style="display:none;">
+    <div id="mapPanel">
+     <div class="map-layout">
+     <div class="map-side">
       <div class="row">
         <div class="seg" id="mapModeSeg">
           <button data-mapmode="single" class="active">單期查詢</button>
           <button data-mapmode="diff">期間相減（A－B）</button>
           <button data-mapmode="typhoon">颱風事件雨量（1958–2026）</button>
         </div>
+      </div>
+      <div class="locate-box">
+        <div class="row locate-row">
+          <input type="text" id="locQuery" placeholder="座標或地址，例：23.45, 120.60／TWD97 X Y／台南市政府" aria-label="座標或地址">
+          <select id="locDatum" aria-label="座標系統" title="數值為 TM2 公尺座標（X、Y）時使用的座標系統">
+            <option value="twd97">TWD97</option><option value="twd67">TWD67</option>
+          </select>
+          <button class="primary" id="locBtn" type="button">定位</button>
+          <button class="ghost" id="locClear" type="button" title="清除定位點">清除</button>
+        </div>
+        <p class="loc-status" id="locStatus">可輸入經緯度（十進位或度分秒）、TWD97／TWD67 二度分帶 X Y、地址、地名或測站名稱；在地圖上按右鍵（手機長按）也可取得該點座標。地址定位需連網。</p>
       </div>
 
       <div id="mapSingleInputs">
@@ -213,9 +230,9 @@
         <label class="check-row dots-toggle" title="只影響雨量圖上的白色測站點；水位／流量圖的測站點即為資料本身，不受影響"><input type="checkbox" id="showDots" checked> 顯示雨量測站白點</label>
         <span class="badge" id="mapStatus"></span>
       </div>
-      <p class="empty-note" style="padding:4px 0;text-align:left;margin:0 0 8px;" id="mapNote">
+      <details class="color-scale-editor" id="mapNote"><summary>地圖說明</summary><p class="empty-note" style="padding:4px 0;text-align:left;margin:0;">
         雨量：以反距離加權（IDW）內插繪製類似中央氣象署雨量圖的分級色塊（配色對照中央氣象署定量降水預報圖）；水位／流量為逐點量測，沿線數值不具面狀連續性，故不內插，改以測站位置＋顏色/大小標示數值。底圖、河川水系、縣市界、以及雨量站／水位站／流量站位置參考圖層，皆可從地圖右上角圖層控制項開關；OpenStreetMap 電子地圖與正射影像為線上圖磚，需連線才會顯示，離線時請維持「無底圖」。地圖左上角另有全螢幕按鈕，可放大檢視。
-      </p>
+      </p></details>
 
       <details class="color-scale-editor" id="colorScaleEditor">
         <summary>地圖色階設定（可自訂）</summary>
@@ -261,18 +278,34 @@
         <p class="empty-note" style="padding:0;text-align:left;margin:2px 0 0;">拖曳即時套用，不需另外按「產生地圖」。</p>
       </details>
 
+     </div>
+     <div class="map-main">
       <div id="mapCanvas"></div>
       <div id="tyPanels" style="display:none;">
         <div id="tySummary"></div>
         <div id="tyDetail"></div>
       </div>
+     </div>
+     </div>
     </div>
 
     <!-- BEFORE/AFTER EVALUATION MODE -->
     <div id="evalPanel" style="display:none;">
       <p class="empty-note" style="padding:0;text-align:left;margin:0 0 10px;">
-        以上方所選測站，比較工程「開工前」與「完工後」同樣長度期間的水位／流量／雨量，並統計超過警戒值的天數（警戒值請在上方「警戒值設定」填入）。可搭配附近雨量站判斷兩段期間降雨是否相當，避免把「雨變少」誤判為「工程有效」。也可從下方「治理工程點位」清單直接帶入工程與最近的水位站。
+        可用「工程位置定位」輸入工程座標或地址，自動找出附近的流量／水位站；或直接用上方所選測站。比較工程「開工前」與「完工後」同樣長度期間的水位／流量／雨量，並統計超過警戒值的天數（警戒值請在上方「警戒值設定」填入）。可搭配附近雨量站判斷兩段期間降雨是否相當，避免把「雨變少」誤判為「工程有效」。也可從下方「治理工程點位」清單直接帶入工程與最近的水位站。
       </p>
+      <div class="ev-locate">
+        <div class="ev-locate-title">工程位置定位（依工程座標找附近流量／水位站）</div>
+        <div class="row">
+          <label class="field ev-grow">工程座標或地址<input type="text" id="evLocQuery" placeholder="例：23.4388, 120.6058／TWD97 211000 2593000"></label>
+          <label class="field">座標系統<select id="evLocDatum"><option value="twd97">TWD97</option><option value="twd67">TWD67</option></select></label>
+          <label class="field">找哪一種測站<select id="evLocType"><option value="discharge" selected>流量站</option><option value="level">水位站</option></select></label>
+          <button class="ghost" id="evLocBtn" type="button">查詢附近測站</button>
+          <button class="ghost" id="evLocClear" type="button" style="display:none;">清除工程位置</button>
+        </div>
+        <p class="loc-status" id="evLocStatus">輸入工程座標後，會列出附近的流量（或水位）站與其流域、河川、距離及資料年份，並標示是否涵蓋施工前後的比較期間；選定測站即可直接評估。</p>
+        <div id="evLocList"></div>
+      </div>
       <p class="ev-project-note" id="evProjectNote"></p>
       <div class="row">
         <label class="field">開工日（選填，施工期不列入比較）<input type="date" id="evStart" min="2001-01-01" max="2024-12-31"></label>
@@ -296,7 +329,7 @@
   </section>
 
   <section class="panel" id="prjPanel">
-    <h2>3. 治理工程點位（匯入）</h2>
+    <h2>治理工程點位（匯入）</h2>
     <div class="row">
       <label class="file-btn">選擇檔案（CSV／GeoJSON）<input type="file" id="prjFile" accept=".csv,.txt,.geojson,.json"></label>
       <button class="ghost" id="prjTemplateBtn" type="button">下載 CSV 範本</button>
@@ -310,7 +343,7 @@
   </section>
 
   <p class="footer-note">
-    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。颱風事件雨量資料來源為中央氣象署颱風資料庫（rdc28.cwa.gov.tw/TDB）雨量統計，時間為該小時結束時間；資料庫只列時雨量 ≥0.1 mm 的小時，缺漏小時視為 0；早年（約 1990 年代以前）僅有少數人工測站，雨量圖為粗略推估；資料庫現行測站清單不含已撤站的舊站。「警戒值設定」與「治理工程點位」只儲存在這台電腦的瀏覽器（清除瀏覽器資料會一併清除），不會上傳；官方警戒水位請依各河川分署公告自行填入。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
+    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。地圖「定位」：座標、測站名稱、縣市名稱離線可用；門牌地址查詢使用 OpenStreetMap（Nominatim）地址服務，需連線，查得位置請自行核對。TWD67 座標以常用經驗公式轉換為 TWD97（誤差約 2 公尺）。颱風事件雨量資料來源為中央氣象署颱風資料庫（rdc28.cwa.gov.tw/TDB）雨量統計，時間為該小時結束時間；資料庫只列時雨量 ≥0.1 mm 的小時，缺漏小時視為 0；早年（約 1990 年代以前）僅有少數人工測站，雨量圖為粗略推估；資料庫現行測站清單不含已撤站的舊站。「警戒值設定」與「治理工程點位」只儲存在這台電腦的瀏覽器（清除瀏覽器資料會一併清除），不會上傳；官方警戒水位請依各河川分署公告自行填入。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
   </p>
 </div>
 
@@ -327,5 +360,6 @@
 <script src="map.js"></script>
 <script src="typhoon.js"></script>
 <script src="audit.js"></script>
+<script src="locate.js"></script>
 </body>
 </html>

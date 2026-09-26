@@ -572,3 +572,52 @@ label.field select { max-width: 100%; }
 .ty-off-play { align-items: center; }
 .ty-off-play .badge { font-variant-numeric: tabular-nums; max-width: 100%; white-space: normal; }
 .ty-off-play .badge:empty { display: none; }
+
+/* ---------- v16: map-first layout ---------- */
+.src-details { margin-top: 4px; font-size: 0.78rem; color: var(--text-secondary); }
+.src-details summary { cursor: pointer; color: var(--text-muted); }
+.src-details p { margin: 4px 0 0; }
+header.top { margin-bottom: 12px; }
+.panel.toolbar { padding: 10px 12px; margin-bottom: 12px; }
+.panel.toolbar .row { margin-bottom: 0; justify-content: space-between; }
+body.mode-map .app { max-width: 1480px; }
+#modePanel:has(#mapPanel:not([style*="none"])) { padding: 12px; }
+.map-layout { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 14px; align-items: start; }
+.map-side { min-width: 0; }
+.map-side .row { gap: 8px; }
+.map-side label.field { min-width: 0; }
+.map-main { min-width: 0; }
+body.mode-map #mapCanvas { height: calc(100vh - 225px); min-height: 480px; margin-top: 0; }
+@media (max-width: 1000px) {
+  .map-layout { grid-template-columns: 1fr; }
+  .map-main { order: -1; }             /* phones / narrow windows: the map comes first */
+  body.mode-map #mapCanvas { height: 62vh; min-height: 360px; }
+}
+.locate-box { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 6px; margin: 0 0 10px; background: var(--surface-2); }
+.locate-row { flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.locate-row input { flex: 1 1 100%; min-width: 0; font-size: 0.85rem; padding: 7px 9px; }
+.locate-row select { flex: 0 0 auto; font-size: 0.8rem; padding: 5px 6px; width: auto; }
+.locate-row button { white-space: nowrap; padding: 6px 14px; font-size: 0.82rem; }
+.loc-status { font-size: 0.74rem; color: var(--text-secondary); line-height: 1.45; margin: 2px 0 2px; }
+.loc-status.err { color: var(--bad); }
+.loc-pop { font-size: 0.78rem; line-height: 1.5; min-width: 220px; }
+.loc-pop b { font-weight: 600; }
+.loc-pop table { border-collapse: collapse; margin: 4px 0; width: 100%; }
+.loc-pop td { padding: 1px 4px 1px 0; vertical-align: top; }
+.loc-pop td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.loc-pop .loc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.loc-pop button { font-size: 0.74rem; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); cursor: pointer; }
+.loc-pop button.primary { background: var(--series-1); color: #fff; border-color: transparent; }
+.loc-marker { width: 18px; height: 18px; border-radius: 50%; background: #e0312b; border: 3px solid #fff; box-shadow: 0 0 0 1.5px #e0312b, 0 1px 4px rgba(0,0,0,.4); }
+.loc-cand { list-style: none; padding: 0; margin: 4px 0 0; }
+.loc-cand li { font-size: 0.76rem; padding: 2px 0; }
+.loc-cand button { font-size: 0.74rem; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); cursor: pointer; margin-right: 6px; }
+.ev-locate { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 8px; margin: 0 0 12px; background: var(--surface-2); }
+.ev-locate-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+.ev-grow { flex: 1 1 280px; }
+.ev-grow input { width: 100%; }
+.ev-st-table td, .ev-st-table th { font-size: 0.78rem; text-align: left; }
+.ev-st-table td.num, .ev-st-table th.num { text-align: right; }
+.ev-st-table button { padding: 3px 10px; font-size: 0.76rem; white-space: nowrap; }
+.ev-st-table tr.sel td { background: color-mix(in srgb, var(--series-1) 12%, transparent); }
+.cov-ok { color: var(--good); } .cov-part { color: var(--warn-2, #b7791f); } .cov-no { color: var(--text-muted); }

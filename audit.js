@@ -230,9 +230,11 @@ function evPopulateRain() {
   const prev = sel.value;
   let opts = [`<option value="">不使用</option>`];
   let firstId = "";
-  if (st && st.lat !== undefined) {
+  // rank rain gauges around the project location when one was entered, else around the selected station
+  const ref = (typeof EV_POINT !== "undefined" && EV_POINT) ? EV_POINT : (st && st.lat !== undefined ? st : null);
+  if (ref) {
     const near = RAINFALL.filter(r => r.lat !== undefined)
-      .map(r => ({ r, d: haversineKm(st.lat, st.lon, r.lat, r.lon) }))
+      .map(r => ({ r, d: haversineKm(ref.lat, ref.lon, r.lat, r.lon) }))
       .sort((a, b) => a.d - b.d).slice(0, 15);
     firstId = near.length ? near[0].r.id : "";
     opts = opts.concat(near.map(({ r, d }) => `<option value="${r.id}">${r.name_zh}（${r.code}）— ${d.toFixed(1)} km</option>`));
@@ -661,6 +663,12 @@ function prjOpenOnMap(p) {
 function prjEvaluate(p) {
   const n = nearestLevelStation(p);
   if (!n) { alert("找不到有座標的水位站"); return; }
+  if (typeof EV_POINT !== "undefined") {       // the project location also drives the rain reference / station list
+    EV_POINT = { lat: p.lat, lon: p.lon, label: p.name };
+    document.getElementById("evLocQuery").value = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+    document.getElementById("evLocClear").style.display = "";
+    document.getElementById("evLocType").value = "level";
+  }
   document.querySelector('#dataTypeSeg button[data-type="level"]').click();
   document.querySelector('#regionSeg button[data-region="all"]').click();
   document.getElementById("stationSearch").value = "";
@@ -672,6 +680,7 @@ function prjEvaluate(p) {
   if (p.end) document.getElementById("evEnd").value = p.end;
   document.getElementById("evStart").value = p.start && p.start <= (p.end || p.start) ? p.start : "";
   document.getElementById("evProjectNote").innerHTML = `評估對象：<b>${escapeHtml(p.name)}</b>，最近水位站「${escapeHtml(n.s.name_zh)}」距離 ${n.d.toFixed(1)} km${n.d > 10 ? "（距離偏遠，請確認該站是否位於工程影響範圍）" : ""}。${p.end ? "" : "此工程未提供完工日，請手動輸入。"}`;
+  if (typeof evRenderStationList === "function") evRenderStationList(false);
   if (p.end) runEval(); else document.getElementById("evResult").innerHTML = "";
   document.getElementById("evalPanel").scrollIntoView({ behavior: "smooth", block: "start" });
 }

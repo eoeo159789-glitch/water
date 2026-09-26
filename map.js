@@ -171,6 +171,7 @@ function ensureMap() {
   addFullscreenControl(leafletMap);
   if (typeof tyAddStationRefLayer === "function") tyAddStationRefLayer(); // no-op until typhoon data is loaded
   if (typeof prjRefreshLayer === "function") prjRefreshLayer(true);     // imported project points, if any
+  if (typeof locAttachMap === "function") locAttachMap(leafletMap);    // right-click / long-press: coordinates
 
   leafletMap.on("baselayerchange", (e) => {
     const isBlank = e.layer === blankBaseLayer;

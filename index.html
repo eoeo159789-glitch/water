@@ -116,7 +116,20 @@
           </div>
         </div>
         <div class="row" id="mapGranInputs"></div>
+        <div class="row" id="wraPlayRow" style="display:none;">
+          <label class="field">播放時間步<select id="wraPlayStep"></select></label>
+          <label class="field">播放內容<select id="wraPlayMode"><option value="day" id="wraPlayModeStep">當日雨量</option><option value="cum" selected>自起始累積</option></select></label>
+          <label class="field">速度<select id="wraPlaySpeed"><option value="1100">慢</option><option value="600" selected>中</option><option value="250">快</option></select></label>
+          <div class="ty-timeline">
+            <button class="ghost" id="wraPlayBtn" type="button">▶ 播放</button>
+            <input type="range" id="wraPlayIdx" min="0" max="0" value="0" aria-label="播放時間">
+            <span class="badge" id="wraPlayLabelEl"></span>
+          </div>
+          <p class="ty-hint" id="wraPlayNote" style="margin:0;flex-basis:100%;"></p>
+        </div>
       </div>
+      <label class="check-row" id="wraZeroRow" style="display:none;"><input type="checkbox" id="wraZeroFill" checked>
+        年報「-」（無降雨）日以 0 mm 納入內插（限該站當月有觀測紀錄者；未勾選時，乾燥測站會被排除，附近降雨會被內插到實際無雨的地區）</label>
 
       <div id="mapDiffInputs" style="display:none;">
         <div class="row">
@@ -154,11 +167,28 @@
         </div>
         <div class="row" id="tyHourlyControls" style="display:none;">
           <label class="field">累積時數<select id="tyWinLen"></select></label>
+          <label class="field">播放間隔<select id="tyStep">
+            <option value="1">逐時（每 1 小時）</option>
+            <option value="3">每 3 小時</option>
+            <option value="6">每 6 小時</option>
+            <option value="day">逐日（每日 00–24 時）</option>
+          </select></label>
           <div class="ty-timeline">
             <button class="ghost" id="tyPlayBtn" type="button">▶ 播放</button>
             <input type="range" id="tyEnd" min="0" max="0" value="0" aria-label="時段結束時間">
             <span class="badge" id="tyEndLabel"></span>
           </div>
+        </div>
+        <div class="ty-official" id="tyOfficialBox" style="display:none;">
+          <div class="row">
+            <label class="field ty-grow">氣象署累積雨量圖（官方圖檔，已校正疊合）<select id="tyOfficial"></select></label>
+            <button class="ghost" id="tyOfficialSync" type="button">本系統改畫同一時段</button>
+          </div>
+          <div class="row">
+            <div class="op-row ty-official-op"><span class="op-lbl">官方圖透明度</span><input type="range" id="tyOfficialOp" min="0" max="100" value="80"><span class="op-val" id="tyOfficialOpVal">80%</span></div>
+            <label class="check-row" style="margin:0;"><input type="checkbox" id="tyHideOwn"> 只看官方圖（暫時隱藏本系統內插圖）</label>
+          </div>
+          <p class="ty-official-note" id="tyOfficialNote"></p>
         </div>
         <label class="check-row"><input type="checkbox" id="tyZeroFill" checked>
           將「該年份前後仍有觀測紀錄、但本場颱風未列資料」的測站視為 0 mm 納入內插（資料庫只收錄 ≥0.1 mm 的時雨量，未勾選時雨區邊緣會被高估）</label>
@@ -170,6 +200,7 @@
       <div class="row">
         <button class="primary" id="mapQueryBtn" type="button">產生地圖</button>
         <button class="ghost" id="exportMapCsvBtn" type="button">匯出 CSV</button>
+        <label class="check-row dots-toggle" title="只影響雨量圖上的白色測站點；水位／流量圖的測站點即為資料本身，不受影響"><input type="checkbox" id="showDots" checked> 顯示雨量測站白點</label>
         <span class="badge" id="mapStatus"></span>
       </div>
       <p class="empty-note" style="padding:4px 0;text-align:left;margin:0 0 8px;" id="mapNote">

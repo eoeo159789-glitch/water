@@ -546,3 +546,20 @@ table.data-table.prj-table th, table.data-table.prj-table td { text-align: left;
 table.data-table.prj-table { min-width: 680px; }
 table.data-table.prj-table td:first-child { min-width: 160px; }
 .prj-table .badge { white-space: nowrap; }
+
+/* official CWA rainfall-map overlay */
+.ty-official { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 4px; margin: 4px 0 10px; background: var(--surface-2); }
+.ty-official .row { margin-bottom: 8px; }
+.ty-official-op { margin: 0; flex: 1 1 280px; }
+.ty-official-note { font-size: 0.76rem; color: var(--text-secondary); margin: 0 0 6px; line-height: 1.55; }
+.ty-readout { font-size: 0.74rem; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--gridline); max-width: 230px; line-height: 1.4; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.ty-official-op { min-width: 0; max-width: 100%; }
+.ty-official-op .op-lbl { width: auto; }
+.ty-official .ty-grow { min-width: 0; }
+.check-row.dots-toggle { margin: 0; align-items: center; white-space: nowrap; }
+.check-row.dots-toggle input { margin-top: 0; }
+#wraPlayRow .field { min-width: 0; max-width: 100%; }
+#wraPlayRow select { max-width: 100%; text-overflow: ellipsis; }
+label.field { max-width: 100%; min-width: 0; }
+label.field select { max-width: 100%; }

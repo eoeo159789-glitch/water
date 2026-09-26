@@ -235,7 +235,7 @@ function runQuery() {
   const chartType = state.dataType === "rainfall" ? "bar" : "line";
 
   resultEl.innerHTML = `
-    <div class="legend-row"><span><span class="swatch" style="background:${color}"></span>${station.name_zh} — ${TYPE_LABEL[state.dataType]}（${UNIT[state.dataType]}）</span></div>
+    <div class="legend-row"><span><span class="swatch" style="background:${color}"></span>${station.name_zh} — ${TYPE_LABEL[state.dataType]}（${UNIT[state.dataType]}${state.dataType === "rainfall" && dates.length > 1 ? "，左軸" : ""}）</span>${state.dataType === "rainfall" && dates.length > 1 ? `<span><span class="swatch" style="background:${cssVar("--series-2")}"></span>累積雨量（mm，右軸）</span>` : ""}</div>
     ${statsTilesHtml(stats)}
     ${exceedTilesHtml(series, dates)}
     <div class="chart-wrap"><canvas id="queryCanvas"></canvas></div>
@@ -262,11 +262,32 @@ function runQuery() {
         borderWidth: 2,
         spanGaps: false,
         tension: 0.15,
-      }]
+      }].concat(cumulativeDataset(series, dates))
     },
-    options: applyThresholdRange(chartOptions(dates.length, state.dataType === "rainfall")),
+    options: withCumulativeAxis(applyThresholdRange(chartOptions(dates.length, state.dataType === "rainfall")), dates),
     plugins: [refLinesPlugin({ hLines: thresholdHLines() })],
   });
+}
+
+// rainfall over more than one day: running total on a right-hand axis ("-" days count as 0 mm)
+function cumulativeDataset(series, dates) {
+  if (state.dataType !== "rainfall" || dates.length < 2) return [];
+  let run = 0;
+  const data = dates.map(d => { const v = series[d]; if (v !== undefined && v !== null) run += v; return Math.round(run * 10) / 10; });
+  return [{
+    type: "line", label: "累積雨量 (mm)", data, yAxisID: "y1",
+    borderColor: cssVar("--series-2"), backgroundColor: "transparent",
+    pointRadius: 0, borderWidth: 2, tension: 0.1, order: 0,
+  }];
+}
+function withCumulativeAxis(options, dates) {
+  if (state.dataType !== "rainfall" || dates.length < 2) return options;
+  options.scales.y1 = {
+    position: "right", beginAtZero: true, grid: { drawOnChartArea: false },
+    ticks: { color: cssVar("--text-muted") }, title: { display: true, text: "累積 (mm)", color: cssVar("--text-muted") },
+  };
+  options.scales.y.title = { display: true, text: "日雨量 (mm)", color: cssVar("--text-muted") };
+  return options;
 }
 
 function chartOptions(n, beginAtZero) {
@@ -489,14 +510,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("rainCount").textContent = RAINFALL.length;
   document.getElementById("riverCount").textContent = RIVER.length;
 
-  setSeg("dataTypeSeg", "type", () => { renderStationOptions(); });
+  setSeg("dataTypeSeg", "type", () => { renderStationOptions(); wraUpdatePlayUi(); });
   setSeg("regionSeg", "region", () => { renderStationOptions(); });
   setSeg("modeSeg", "mode", () => {
     document.getElementById("queryPanel").style.display = state.mode === "query" ? "" : "none";
     document.getElementById("comparePanel").style.display = state.mode === "compare" ? "" : "none";
     document.getElementById("mapPanel").style.display = state.mode === "map" ? "" : "none";
     document.getElementById("evalPanel").style.display = state.mode === "eval" ? "" : "none";
-    if (state.mode !== "map") tyLeaveMode();
+    if (state.mode !== "map") { tyLeaveMode(); wraStopPlay(true); }
     if (state.mode === "eval") evOnEnter();
     if (state.mode === "map") {
       const map = ensureMap();
@@ -516,6 +537,7 @@ document.addEventListener("DOMContentLoaded", () => {
     clearMapLayers();
     document.getElementById("mapStatus").textContent = "";
     if (ty) tyEnterMode(); else tyLeaveMode();
+    wraUpdatePlayUi();
   });
 
   document.addEventListener("change", e => {

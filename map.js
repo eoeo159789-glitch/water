@@ -17,6 +17,19 @@ let lastHeatmapPoints = null;   // for zoom-triggered re-render (single rainfall
 let lastHeatmapDiverging = null; // {maxAbs} when the last heatmap was a diverging diff map
 let lastHeatmapOpts = null;      // {maxDistKm} used by the last heatmap (typhoon mode uses adaptive radius)
 let layersControlRef = null;     // Leaflet layer control, so later-loaded layers (typhoon stations) can be added
+// white station dots on rainfall maps: user can hide them (remembered in this browser)
+let SHOW_STATION_DOTS = (() => { try { return localStorage.getItem("hy_show_dots") !== "0"; } catch (e) { return true; } })();
+function addDotsLayer(layer) {
+  layer._isDots = true;
+  if (SHOW_STATION_DOTS) layer.addTo(leafletMap);
+}
+function applyShowDots(v) {
+  SHOW_STATION_DOTS = v;
+  try { localStorage.setItem("hy_show_dots", v ? "1" : "0"); } catch (e) { /* ignore */ }
+  if (mapMarkersLayer && mapMarkersLayer._isDots && leafletMap) {
+    if (v) mapMarkersLayer.addTo(leafletMap); else leafletMap.removeLayer(mapMarkersLayer);
+  }
+}
 let lastMapRows = null;         // for CSV export
 let zoomRenderTimer = null;
 
@@ -53,8 +66,10 @@ let RAIN_MIN_THRESHOLD = 0.5;     // mm; below this, no color is drawn
 let DIVERGING_POS_COLOR = [200, 0, 0];   // period-diff "increase" color
 let DIVERGING_NEG_COLOR = [0, 80, 210];  // period-diff "decrease" color
 
+let WRA_BINS_OVERRIDE = null;   // extended bins while playing a cumulative daily animation
 function activeRainBins() {
-  return CUSTOM_RAIN_BINS || (typeof tyActiveBins === "function" ? tyActiveBins() : null) || CWA_RAIN_BINS;
+  return CUSTOM_RAIN_BINS || (state.mapmode !== "typhoon" ? WRA_BINS_OVERRIDE : null) ||
+    (typeof tyActiveBins === "function" ? tyActiveBins() : null) || CWA_RAIN_BINS;
 }
 
 function rainColorFor(v) {
@@ -468,28 +483,9 @@ function runMapQuery() {
   if (dates.length === 0) { statusEl.textContent = "請輸入有效的日期範圍"; return; }
 
   if (state.dataType === "rainfall") {
-    const points = [];
-    RAINFALL.forEach(s => {
-      if (s.lat === undefined) return;
-      const st = aggregateForMap(s.daily, dates);
-      if (st.sum !== null) points.push({ lat: s.lat, lon: s.lon, value: st.sum, name: s.name_zh, code: s.code });
-    });
-    statusEl.textContent = `${points.length} 個雨量站參與內插（期間總雨量，反距離加權 IDW）`;
-    lastHeatmapPoints = points;
-    lastHeatmapDiverging = null;
-    const { dataUrl, bounds } = renderRainfallHeatmap(points, null);
-    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(map);
-
-    mapMarkersLayer = L.featureGroup();
-    points.forEach(p => {
-      const m = L.circleMarker([p.lat, p.lon], {
-        radius: 3, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: STATION_OPACITY
-      }).bindTooltip(`${p.name}：${fmt(p.value, 1)} mm`);
-      mapMarkersLayer.addLayer(m);
-    });
-    mapMarkersLayer.addTo(map);
-    addRainLegend("總雨量 (mm)");
-    lastMapRows = points.map(p => [p.code || "", p.name || "", round3(p.value)]);
+    wraStopPlay(true);
+    WRA_BINS_OVERRIDE = null;
+    renderWraRainMap(dates, { title: "總雨量 (mm)", label: "期間總雨量" });
   } else {
     const key = state.dataType; // level | discharge
     const points = [];
@@ -538,10 +534,9 @@ function runMapDiffQuery() {
     const points = [];
     RAINFALL.forEach(s => {
       if (s.lat === undefined) return;
-      const stA = aggregateForMap(s.daily, datesA);
-      const stB = aggregateForMap(s.daily, datesB);
-      if (stA.sum !== null && stB.sum !== null) {
-        points.push({ lat: s.lat, lon: s.lon, value: stA.sum - stB.sum, valueA: stA.sum, valueB: stB.sum, name: s.name_zh, code: s.code });
+      const a = wraRainSum(s, datesA), b = wraRainSum(s, datesB);
+      if (a !== null && b !== null) {
+        points.push({ lat: s.lat, lon: s.lon, value: a - b, valueA: a, valueB: b, name: s.name_zh, code: s.code });
       }
     });
     if (points.length === 0) { statusEl.textContent = "兩期間皆有資料的雨量站數為 0，無法比較"; return; }
@@ -559,7 +554,7 @@ function runMapDiffQuery() {
       }).bindTooltip(`${p.name}：${p.value > 0 ? "+" : ""}${fmt(p.value, 1)} mm（A: ${fmt(p.valueA, 1)}，B: ${fmt(p.valueB, 1)}）`);
       mapMarkersLayer.addLayer(m);
     });
-    mapMarkersLayer.addTo(map);
+    addDotsLayer(mapMarkersLayer); // white station dots (can be hidden)
     addDivergingRainLegend("總雨量差 A－B (mm)", maxAbs);
     lastMapRows = points.map(p => [p.code || "", p.name || "", round3(p.valueA), round3(p.valueB), round3(p.value)]);
   } else {
@@ -592,6 +587,321 @@ function runMapDiffQuery() {
     lastMapRows = points.map(p => [p.code || "", p.name || "", round3(p.valueA), round3(p.valueB), round3(p.value)]);
   }
 }
+
+/* ---------- yearbook rainfall: "-" (no rain) days are stored as missing ----------
+   A station that has any record in a month was operating that month, so its missing days there are
+   dry days (0 mm). Without this, dry stations drop out and nearby rain is interpolated into dry areas. */
+let WRA_ZERO_FILL = (() => { try { return localStorage.getItem("hy_wra_zero") !== "0"; } catch (e) { return true; } })();
+function stationMonths(s) {
+  if (!s._months) s._months = new Set(Object.keys(s.daily).map(d => d.slice(0, 7)));
+  return s._months;
+}
+function wraRainSum(s, dates) {
+  let sum = 0, n = 0;
+  for (const d of dates) { const v = s.daily[d]; if (v !== undefined && v !== null) { sum += v; n++; } }
+  if (n) return sum;
+  if (!WRA_ZERO_FILL) return null;
+  const months = stationMonths(s);
+  return dates.some(d => months.has(d.slice(0, 7))) ? 0 : null;
+}
+
+// yearbook (WRA) station points for a set of dates
+function wraPoints(dates) {
+  const points = [];
+  let zeros = 0;
+  RAINFALL.forEach(s => {
+    if (s.lat === undefined) return;
+    const v = wraRainSum(s, dates);
+    if (v === null) return;
+    if (v === 0 && !dates.some(d => s.daily[d] !== undefined && s.daily[d] !== null)) zeros++;
+    points.push({ lat: s.lat, lon: s.lon, value: v, name: s.name_zh, code: s.code });
+  });
+  return { points, zeros, ipoints: points, radius: 22 };
+}
+
+// CWA typhoon-database hourly points: rainfall of hours [a, b] (indices of hour-ending times) of typhoon t
+function cwaHourPoints(t, a, b) {
+  const prep = tyPrepared(t);
+  const points = [];
+  const listed = new Set();
+  for (const [si, c] of prep.cum) {
+    listed.add(si);
+    const s = CWA_STATIONS[si];
+    points.push({ lat: s[6], lon: s[5], value: c[b + 1] - c[a], name: s[1], code: s[0], outer: s[3] === "外島" });
+  }
+  let zeros = 0;
+  CWA_STATIONS.forEach((s, si) => {   // operating stations with no rain at all this typhoon = 0 mm
+    if (listed.has(si) || !s[7] || s[7] > t.y || t.y > s[8]) return;
+    points.push({ lat: s[6], lon: s[5], value: 0, name: s[1], code: s[0], outer: s[3] === "外島" });
+    zeros++;
+  });
+  const ipoints = points.filter(p => !p.outer);
+  return { points, zeros, ipoints, radius: tyRadiusKm(ipoints.length) };
+}
+
+// draw an interpolated rainfall map from a point set (query result or a playback frame)
+function renderRainPointsMap(P, opts) {
+  opts = opts || {};
+  const map = ensureMap();
+  const statusEl = document.getElementById("mapStatus");
+  const { dataUrl, bounds } = renderRainfallHeatmap(P.ipoints, null, { maxDistKm: P.radius, width: opts.light ? 360 : undefined });
+  if (opts.light && mapImageOverlay && mapMarkersLayer && mapMarkersLayer._wra && mapMarkersLayer._src === opts.src) {
+    mapImageOverlay.setUrl(dataUrl);   // playback frame: swap the raster, keep legend
+    mapMarkersLayer.clearLayers();
+  } else {
+    clearMapLayers();
+    mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(map);
+    mapMarkersLayer = L.featureGroup();
+    mapMarkersLayer._wra = true;
+    mapMarkersLayer._src = opts.src;
+    addDotsLayer(mapMarkersLayer); // white station dots (can be hidden)
+    addRainLegend(opts.title || "總雨量 (mm)");
+  }
+  P.points.forEach(p => {
+    mapMarkersLayer.addLayer(L.circleMarker([p.lat, p.lon], {
+      radius: opts.src === "day" ? 3 : 2.3, color: "#333", weight: opts.src === "day" ? 1 : 0.8, opacity: STATION_OPACITY, fillColor: "#fff", fillOpacity: STATION_OPACITY
+    }).bindTooltip(`${p.name}：${fmt(p.value, 1)} mm${opts.tip ? "（" + opts.tip + "）" : ""}`));
+  });
+  lastHeatmapPoints = P.ipoints;
+  lastHeatmapDiverging = null;
+  lastHeatmapOpts = { maxDistKm: P.radius };
+  statusEl.textContent = opts.src === "hour" || opts.src === "cday"
+    ? `${P.ipoints.length} 個氣象署測站參與內插（${opts.label}，${opts.src === "cday" ? "逐時資料加總" : "逐時資料"}；內插半徑 ${P.radius} km）` + (P.zeros ? `；含推定 0 mm ${P.zeros} 站` : "")
+    : `${P.points.length} 個雨量站參與內插（${opts.label || "期間總雨量"}，反距離加權 IDW）` + (P.zeros ? `；其中 ${P.zeros} 站當期無降雨紀錄、以 0 mm 計` : "");
+  lastMapRows = P.points.map(p => [p.code || "", p.name || "", round3(p.value)]);
+}
+
+// interpolated yearbook rainfall map for a set of dates (used by the query and by daily playback)
+function renderWraRainMap(dates, opts) {
+  renderRainPointsMap(wraPoints(dates), { ...opts, src: "day" });
+}
+
+/* ---------- playback of the rainfall map: daily (yearbook) or hourly (CWA typhoon database) ---------- */
+let wraPlayTimer = null;
+let wraHourOpts = [];   // typhoons whose hourly records overlap the selected dates: [{t, a, b}]
+function wraSelDates() {
+  if (!document.querySelector("#mapGranInputs input, #mapGranInputs select")) return [];
+  try { return currentMapDates(); } catch (e) { return []; }
+}
+function wraStep() {
+  const v = document.getElementById("wraPlayStep").value || "day";
+  if (v === "day") return { kind: "day" };
+  const [kind, id] = v.split(":");
+  const o = wraHourOpts.find(o => o.t.id === id);
+  if (!o) return { kind: "day" };
+  return kind === "cday" ? { kind: "cday", ...o, days: wraCwaDays(o) } : { kind: "hour", ...o };
+}
+// calendar days (00:00-24:00, as on the official CWA daily maps) covered by a typhoon's hourly records
+function wraCwaDays(o) {
+  const days = [];
+  for (let h = o.a; h <= o.b; h++) {
+    const begin = new Date(tyHourDate(o.t, h).getTime() - 3600e3);   // hour h ends at tyHourDate(h)
+    const d = begin.toISOString().slice(0, 10);
+    if (!days.length || days[days.length - 1].d !== d) days.push({ d, a: h, b: h });
+    else days[days.length - 1].b = h;
+  }
+  days.forEach(x => { x.hours = x.b - x.a + 1; });
+  return days;
+}
+function wraFrames() {
+  const st = wraStep();
+  if (st.kind === "hour") return Array.from({ length: st.b - st.a + 1 }, (_, i) => st.a + i);
+  if (st.kind === "cday") return st.days;
+  return state.mapgran === "day" ? [] : wraSelDates();
+}
+// typhoons in the CWA database whose hourly window overlaps the selected dates
+function wraFindTyphoons(dates) {
+  if (!dates.length || typeof CWA_TYPHOONS === "undefined") return [];
+  const s = dates[0] + " 00:00";
+  const endD = new Date(dates[dates.length - 1] + "T00:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 1);
+  const e = endD.toISOString().slice(0, 10) + " 00:00";
+  const out = [];
+  for (const t of CWA_TYPHOONS) {
+    if (Math.abs(t.y - +dates[0].slice(0, 4)) > 1) continue;
+    const a = Math.max(0, tyHourIndex(t, s) + 1), b = Math.min(t.n - 1, tyHourIndex(t, e));  // hours ending in (s, e]
+    if (a <= b) out.push({ t, a, b });
+  }
+  return out;
+}
+async function wraRefreshStepOptions() {
+  const sel = document.getElementById("wraPlayStep");
+  if (!sel) return;
+  const prev = sel.value;
+  if (state.dataType === "rainfall" && state.mapmode === "single") {
+    try { await ensureTyphoonMeta(); } catch (e) { /* typhoon data unavailable: daily only */ }
+  }
+  wraHourOpts = wraFindTyphoons(wraSelDates());
+  const opts = [];
+  if (state.mapgran !== "day") opts.push(`<option value="day">逐日（水利署年報日雨量）</option>`);
+  wraHourOpts.forEach(o => {
+    const nd = wraCwaDays(o).length;
+    if (nd >= 1 && state.mapgran !== "day") opts.push(`<option value="cday:${o.t.id}">逐日（${o.t.y} ${o.t.zh} 颱風，氣象署測站，由逐時資料加總 ${nd} 天）</option>`);
+    opts.push(`<option value="hour:${o.t.id}">逐時（${o.t.y} ${o.t.zh} 颱風，氣象署逐時資料 ${o.b - o.a + 1} 小時）</option>`);
+  });
+  sel.innerHTML = opts.join("") || `<option value="">（此期間無可播放資料）</option>`;
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  wraUpdatePlayUi(true);
+}
+function wraUpdatePlayUi(fromRefresh) {
+  const row = document.getElementById("wraPlayRow");
+  if (!row) return;
+  document.getElementById("wraZeroRow").style.display =
+    state.dataType === "rainfall" && state.mapmode !== "typhoon" ? "" : "none";
+  // only while the map view with its date inputs is on screen
+  const inputsReady = !!document.querySelector("#mapGranInputs input, #mapGranInputs select");
+  const show = state.mode === "map" && inputsReady && state.dataType === "rainfall" && state.mapmode === "single";
+  row.style.display = show ? "" : "none";
+  if (!show) { wraStopPlay(true); return; }
+  if (!fromRefresh) { wraRefreshStepOptions(); return; }
+  const all = wraFrames();
+  const sl = document.getElementById("wraPlayIdx");
+  sl.max = Math.max(0, all.length - 1);
+  if (+sl.value > all.length - 1) sl.value = Math.max(0, all.length - 1);
+  document.getElementById("wraPlayBtn").disabled = all.length < 2;
+  const st = wraStep();
+  document.getElementById("wraPlayModeStep").textContent = st.kind === "hour" ? "當時雨量（1 小時）" : "當日雨量";
+  const partial = st.kind === "cday" ? st.days.filter(x => x.hours < 24) : [];
+  document.getElementById("wraPlayNote").textContent = st.kind === "cday"
+    ? `氣象署逐日：以中央氣象署颱風資料庫約 ${st.t.ns} 個測站的逐時雨量，依 00:00～24:00 加總成日雨量（與氣象署官方日累積雨量圖同一日界），測站比水利署年報密。` +
+      (partial.length ? `其中 ${partial.map(x => `${x.d.slice(5)} 僅 ${x.hours} 小時`).join("、")}（颱風資料期間外的小時沒有資料），該日數值會偏低。` : "")
+    : st.kind === "hour"
+    ? `逐時播放使用中央氣象署颱風資料庫的測站與逐時雨量（與水利署年報測站不同）；只涵蓋該颱風的逐時資料期間（${tyFmtHour(st.t, 0, true)} 起 ${st.t.n} 小時）。`
+    : (wraHourOpts.length ? "年報為日雨量，逐日播放用水利署測站；此期間另有颱風逐時資料，可在「時間步」改選逐時播放。"
+                          : "年報為日雨量，逐日播放用水利署測站；逐時播放僅在所選期間與颱風事件重疊時提供（氣象署颱風逐時資料）。");
+  wraPlayLabel();
+}
+function wraPlayLabel() {
+  const all = wraFrames();
+  const i = +document.getElementById("wraPlayIdx").value;
+  const mode = document.getElementById("wraPlayMode").value;
+  const el = document.getElementById("wraPlayLabelEl");
+  if (!all.length) { el.textContent = state.mapgran === "day" ? "單日僅能逐時播放（需與颱風逐時資料重疊）" : "請先選擇有效的月份或區間"; return; }
+  const st = wraStep();
+  if (st.kind === "cday") {
+    const x = all[i], note = x.hours < 24 ? `，僅 ${x.hours} 小時資料` : "";
+    el.textContent = mode === "cum" ? `${all[0].d} ～ ${x.d}（第 ${i + 1}/${all.length} 天累積${note}）` : `${x.d}（第 ${i + 1}/${all.length} 天${note}）`;
+    return;
+  }
+  if (st.kind === "hour") {
+    const t = st.t, h = all[i], h0 = all[0];
+    const begin = new Date(tyHourDate(t, h0).getTime() - 3600e3);
+    const b = `${pad2(begin.getUTCMonth() + 1)}-${pad2(begin.getUTCDate())} ${pad2(begin.getUTCHours())}:00`;
+    el.textContent = mode === "cum" ? `${b} ～ ${tyFmtHour(t, h)}（第 ${i + 1}/${all.length} 小時累積）` : `${tyFmtHour(t, h)} 止的 1 小時（第 ${i + 1}/${all.length} 小時）`;
+    return;
+  }
+  el.textContent = mode === "cum" ? `${all[0]} ～ ${all[i]}（第 ${i + 1}/${all.length} 天累積）` : `${all[i]}（第 ${i + 1}/${all.length} 天）`;
+}
+async function wraRenderFrame(light) {
+  const all = wraFrames();
+  if (!all.length) return;
+  const i = +document.getElementById("wraPlayIdx").value;
+  const mode = document.getElementById("wraPlayMode").value;
+  const st = wraStep();
+  if (st.kind === "cday") {
+    await ensureTyHourly(st.t);
+    const x = all[i], a = mode === "cum" ? all[0].a : x.a;
+    renderRainPointsMap(cwaHourPoints(st.t, a, x.b), {
+      light, src: "cday",
+      title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
+      label: mode === "cum" ? `${all[0].d}～${x.d} 累積，氣象署測站` : `${x.d} 當日雨量，氣象署測站`,
+      tip: mode === "cum" ? `至 ${x.d} 累積` : x.d,
+    });
+    return;
+  }
+  if (st.kind === "hour") {
+    await ensureTyHourly(st.t);
+    const a = mode === "cum" ? all[0] : all[i], b = all[i];
+    renderRainPointsMap(cwaHourPoints(st.t, a, b), {
+      light, src: "hour",
+      title: mode === "cum" ? "自起始時累積 (mm)" : "時雨量 (mm)",
+      label: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時雨量`,
+      tip: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時`,
+    });
+    return;
+  }
+  const ds = mode === "cum" ? all.slice(0, i + 1) : [all[i]];
+  renderWraRainMap(ds, {
+    light,
+    title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
+    label: mode === "cum" ? `${all[0]}～${all[i]} 累積` : `${all[i]} 當日雨量`,
+    tip: mode === "cum" ? `至 ${all[i]} 累積` : all[i],
+  });
+}
+async function wraTogglePlay() {
+  if (wraPlayTimer) { wraStopPlay(); return; }
+  const all = wraFrames();
+  if (all.length < 2) return;
+  const sl = document.getElementById("wraPlayIdx");
+  const mode = document.getElementById("wraPlayMode").value;
+  const st = wraStep();
+  if (st.kind === "hour" || st.kind === "cday") await ensureTyHourly(st.t);
+  // one colour scale for the whole animation: any frame past 350 mm switches to the extended bins
+  WRA_BINS_OVERRIDE = null;
+  if (typeof TY_EXT_BINS !== "undefined") {
+    let maxV = 0;
+    const pmax = P => Math.max(0, ...P.points.map(p => p.value));
+    if (st.kind === "hour") {
+      maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0], all[all.length - 1])) : 0;
+    } else if (st.kind === "cday") {
+      maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0].a, all[all.length - 1].b))
+                            : Math.max(...all.map(x => pmax(cwaHourPoints(st.t, x.a, x.b))));
+    } else if (mode === "cum") {
+      maxV = Math.max(0, ...RAINFALL.map(s => wraRainSum(s, all) || 0));
+    } else {
+      maxV = Math.max(0, ...RAINFALL.map(s => Math.max(0, ...all.map(d => s.daily[d] || 0))));
+    }
+    if (maxV > 350) WRA_BINS_OVERRIDE = TY_EXT_BINS;
+  }
+  if (+sl.value >= all.length - 1) sl.value = 0;
+  document.getElementById("wraPlayBtn").textContent = "❚❚ 暫停";
+  clearMapLayers(); // start from a fresh layer set (legend matches the chosen scale)
+  const delay = +document.getElementById("wraPlaySpeed").value || 600;
+  wraPlayTimer = -1;
+  const step = async () => {
+    if (!wraPlayTimer) return;
+    wraPlayLabel();
+    await wraRenderFrame(true);
+    if (!wraPlayTimer) return;
+    if (+sl.value >= all.length - 1) { wraStopPlay(); return; }
+    sl.value = +sl.value + 1;
+    wraPlayTimer = setTimeout(step, delay);
+  };
+  wraPlayTimer = setTimeout(step, 0);
+}
+function wraStopPlay(silent) {
+  if (!wraPlayTimer) return;
+  if (wraPlayTimer !== -1) clearTimeout(wraPlayTimer);
+  wraPlayTimer = null;
+  const b = document.getElementById("wraPlayBtn");
+  if (b) b.textContent = "▶ 播放";
+  if (!silent) { clearMapLayers(); wraRenderFrame(false); } // last frame at full resolution
+}
+document.addEventListener("DOMContentLoaded", () => {
+  if (!document.getElementById("wraPlayRow")) return;
+  const zf = document.getElementById("wraZeroFill");
+  zf.checked = WRA_ZERO_FILL;
+  zf.addEventListener("change", e => {
+    WRA_ZERO_FILL = e.target.checked;
+    try { localStorage.setItem("hy_wra_zero", WRA_ZERO_FILL ? "1" : "0"); } catch (err) { /* ignore */ }
+  });
+  document.getElementById("wraPlayBtn").addEventListener("click", wraTogglePlay);
+  let t = null;
+  document.getElementById("wraPlayIdx").addEventListener("input", () => {
+    wraPlayLabel();
+    if (wraPlayTimer) return;
+    clearTimeout(t);
+    t = setTimeout(() => wraRenderFrame(true), 60);
+  });
+  document.getElementById("wraPlayIdx").addEventListener("change", () => { if (!wraPlayTimer) { clearMapLayers(); wraRenderFrame(false); } });
+  document.getElementById("wraPlayMode").addEventListener("change", () => { wraStopPlay(true); wraPlayLabel(); });
+  document.getElementById("wraPlayStep").addEventListener("change", () => {
+    wraStopPlay(true);
+    document.getElementById("wraPlayIdx").value = 0;
+    wraUpdatePlayUi(true);
+  });
+  // deferred: the typhoon quick-pick fills the date inputs in a document-level handler that runs after this one
+  document.getElementById("mapGranInputs").addEventListener("change", () => { wraStopPlay(true); setTimeout(() => wraUpdatePlayUi(), 0); });
+});
 
 function aggregateForMap(series, dates) {
   return aggregate(series, dates);
@@ -629,6 +939,7 @@ function renderMapGranInputs() {
     <label class="field">颱風快選<select class="typhoon-pick" data-start="mStart" data-end="mEnd"><option value="">不套用</option></select></label>`;
   }
   populateTyphoonSelects();
+  wraUpdatePlayUi();
 }
 
 function currentMapDates() {
@@ -808,3 +1119,9 @@ function initOpacityEditor() {
 }
 
 document.addEventListener("DOMContentLoaded", initOpacityEditor);
+document.addEventListener("DOMContentLoaded", () => {
+  const cb = document.getElementById("showDots");
+  if (!cb) return;
+  cb.checked = SHOW_STATION_DOTS;
+  cb.addEventListener("change", e => applyShowDots(e.target.checked));
+});

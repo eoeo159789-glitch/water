@@ -17,7 +17,7 @@ const TY_STATS = [
 const TY_CLS = ["—", "大雨", "豪雨", "大豪雨", "超大豪雨"];
 const TY_WIN_OPTS = [[0, "自事件開始累積"], [1, "1 小時"], [3, "3 小時"], [6, "6 小時"], [12, "12 小時"], [24, "24 小時"], [48, "48 小時"]];
 
-const tyState = { id: null, stat: "total", cmp: "", winLen: 0, endIdx: null, zeroFill: true, radius: "auto", scale: "auto", si: null };
+const tyState = { id: null, stat: "total", cmp: "", winLen: 0, endIdx: null, zeroFill: true, radius: "auto", scale: "auto", step: "1", si: null };
 
 // Typhoon event totals often reach 1,000–2,000+ mm, far past the standard daily scale's open-ended
 // ">=300" bin. This extension keeps the CWA bins up to 300 mm and continues in steps above it.
@@ -37,6 +37,8 @@ let tyUseExt = false;
 // scale from the color-scale editor still takes precedence
 function tyActiveBins() {
   if (state.mode !== "map" || state.mapmode !== "typhoon") return null;
+  // while an official CWA map is shown, "auto" uses that map's own classes & colours for a 1:1 comparison
+  if (tyState.scale === "auto" && typeof tyOff !== "undefined" && tyOff.overlay && tyOff.entry) return tyOfficialBins();
   if (tyState.scale === "std") return null;
   if (tyState.scale === "ext" || tyUseExt) return TY_EXT_BINS;
   return null;
@@ -83,6 +85,7 @@ async function ensureTyphoonMeta() {
     tyIndex = {};
     CWA_TYPHOONS.forEach(t => { tyIndex[t.id] = t; });
   }
+  await tyLoadMapIndex();
   tyAddStationRefLayer();
 }
 function tyById(id) { return tyIndex ? tyIndex[id] : null; }
@@ -264,7 +267,7 @@ async function runTyphoonMap(opts) {
       tyMarkers.set(p.si, m);
       mapMarkersLayer.addLayer(m);
     });
-    mapMarkersLayer.addTo(map);
+    addDotsLayer(mapMarkersLayer);
     if (B) addDivergingRainLegend(unitTitle, diverging.maxAbs); else addRainLegend(unitTitle);
   }
   lastHeatmapOpts = { maxDistKm: radius };
@@ -282,6 +285,7 @@ async function runTyphoonMap(opts) {
   tyRenderSummary({ t, cmpT, def, pts, zeroCount: A.zeroCount });
   tyBuildExport(t, cmpT, def, pts);
   if (!opts.frame && tyState.si !== null && tyState.si !== undefined) tyRenderDetail(tyState.si);
+  tyOfficialAfterRender();
 }
 
 function tyMarkerStyle(p, selected) {
@@ -520,6 +524,7 @@ function tyOnTyphoonChanged() {
   tyFillStatSelect();
   document.getElementById("tyDetail").innerHTML = "";
   if (tyChart) { tyChart.destroy(); tyChart = null; }
+  tyRefreshOfficialControls();
   // keep the selected station if it has data in the new typhoon too; the detail panel re-renders after the map
 }
 
@@ -543,7 +548,7 @@ function tyTogglePlay() {
     tyShowHourlyControls();
   }
   if (tyState.cmp) { tyState.cmp = ""; document.getElementById("tyCompare").value = ""; }
-  if (tyState.endIdx >= t.n - 1) tyState.endIdx = 0;
+  if (tyState.endIdx >= t.n - 1) tyState.endIdx = tyState.step === "day" ? tyNextMidnight(t, -1) : 0;
   const slider = document.getElementById("tyEnd");
   document.getElementById("tyPlayBtn").textContent = "❚❚ 暫停";
   const step = async () => {
@@ -553,10 +558,20 @@ function tyTogglePlay() {
     await runTyphoonMap({ frame: true });
     if (!tyPlayTimer) return;
     if (tyState.endIdx >= t.n - 1) { tyStopPlay(); return; }
-    tyState.endIdx++;
+    tyState.endIdx = tyNextStep(t, tyState.endIdx);
     tyPlayTimer = setTimeout(step, 350);
   };
   tyPlayTimer = setTimeout(step, 0);
+}
+
+// hour index of the next hour ending at 00:00 after idx (or the last hour when none is left)
+function tyNextMidnight(t, idx) {
+  for (let j = idx + 1; j < t.n; j++) if (tyHourDate(t, j).getUTCHours() === 0) return j;
+  return t.n - 1;
+}
+function tyNextStep(t, idx) {
+  if (tyState.step === "day") return tyNextMidnight(t, idx);
+  return Math.min(t.n - 1, idx + parseInt(tyState.step, 10));
 }
 
 function tyStopPlay(silent) {
@@ -609,7 +624,7 @@ function tyInitControls() {
   document.getElementById("tyCompare").addEventListener("change", e => { tyStopPlay(true); tyState.cmp = e.target.value; rerender(); });
   document.getElementById("tyRadius").addEventListener("change", e => { tyState.radius = e.target.value; rerender(); });
   document.getElementById("tyScale").addEventListener("change", e => { tyState.scale = e.target.value; rerender(); });
-  document.getElementById("tyZeroFill").addEventListener("change", e => { tyState.zeroFill = e.target.checked; rerender(); });
+  document.getElementById("tyZeroFill").addEventListener("change", e => { tyState.zeroFill = e.target.checked; rerender(); if (tyOff.entry) tyRefreshOfficialNote(); });
   document.getElementById("tyWinLen").addEventListener("change", e => { tyState.winLen = parseInt(e.target.value, 10); tyUpdateEndLabel(); rerender(); });
   let sliderTimer = null;
   document.getElementById("tyEnd").addEventListener("input", e => {
@@ -621,6 +636,15 @@ function tyInitControls() {
   });
   document.getElementById("tyEnd").addEventListener("change", () => { if (!tyPlayTimer) runTyphoonMap(); });
   document.getElementById("tyPlayBtn").addEventListener("click", tyTogglePlay);
+  document.getElementById("tyStep").addEventListener("change", e => {
+    tyState.step = e.target.value;
+    // daily steps: show each calendar day's rainfall unless the user is accumulating from the start
+    if (tyState.step === "day" && tyState.winLen !== 0 && tyState.winLen !== 24) {
+      tyState.winLen = 24;
+      document.getElementById("tyWinLen").value = "24";
+      tyUpdateEndLabel();
+    }
+  });
   document.getElementById("tySummary").addEventListener("click", e => {
     const tr = e.target.closest(".ty-row");
     if (tr) tySelectStation(parseInt(tr.dataset.si, 10));
@@ -655,4 +679,248 @@ async function tyEnterMode() {
 }
 function tyLeaveMode() {
   tyStopPlay(true);
+  tyClearOfficial();
 }
+
+/* ---------- official CWA accumulated-rainfall maps (user-supplied images, georeferenced offline) ----------
+   typhoon_maps/index.js     frame of the 0.01° lat/lon image grid + which typhoons have maps
+   typhoon_maps/maps_<Y>.js  per-year entries: {start, end, png (data URI, pre-warped to web-mercator), rle} */
+const tyOff = { entry: null, overlay: null, grid: null, control: null, legendOpen: true, opacity: 0.8, hideOwn: false, seq: 0 };
+
+async function tyLoadMapIndex() {
+  if (window.CWA_TY_MAP_INDEX) return;
+  try { await loadScriptOnce("typhoon_maps/index.js"); } catch (e) { window.CWA_TY_MAP_INDEX = {}; }
+}
+function tyOffLabel(e) { return `${e[0].slice(5)} ～ ${e[1].slice(5)}`; }
+function tyHourIndex(t, s) {
+  return Math.round((new Date(s.replace(" ", "T") + ":00Z") - new Date(t.t0.replace(" ", "T") + ":00Z")) / 3600e3);
+}
+function tyOffWindow(t, e) {
+  const a = tyHourIndex(t, e[0]) + 1, b = tyHourIndex(t, e[1]);   // hours ending in (start, end]
+  return { a, b, covered: a >= 0 && b <= t.n - 1, overlap: Math.max(0, Math.min(b, t.n - 1) - Math.max(a, 0) + 1), len: b - a + 1 };
+}
+// each map carries its own template frame and legend scale ("std" 1–300 mm or "large" 10–1500 mm)
+function tyOffFrame(e) { e = e || tyOff.entry; return e ? CWA_MAP_FRAMES[e.frame || "new"] : null; }
+function tyOffEdges(e) { e = e || tyOff.entry; return CWA_MAP_LEGENDS[(e && e.legend) || "std"]; }
+function tyOffClassOf(v, e) {
+  if (!(v > 0)) return -1;
+  const E = tyOffEdges(e);
+  for (let k = 0; k < 17; k++) if (E[k + 1] === null || v < E[k + 1]) return k;
+  return 16;
+}
+function tyOffClassLabel(k, e) {
+  if (k < 0) return "無降雨";
+  const E = tyOffEdges(e);
+  if (k === 0) return `< ${E[1]} mm`;
+  return E[k + 1] === null ? `≥ ${E[k]} mm` : `${E[k]}–${E[k + 1]} mm`;
+}
+function tyOffGridAt(lat, lon) {
+  const F = tyOffFrame();
+  if (!F) return null;
+  const x = Math.floor((lon - F.west) / (F.east - F.west) * F.w), y = Math.floor((F.north - lat) / (F.north - F.south) * F.h);
+  if (!tyOff.grid || x < 0 || y < 0 || x >= F.w || y >= F.h) return null;
+  return tyOff.grid[y * F.w + x] - 1;
+}
+function tyDecodeRle(rle, n) {
+  const g = new Uint8Array(n);
+  let p = 0;
+  for (let i = 0; i < rle.length; i += 2) { g.fill(rle[i], p, p + rle[i + 1]); p += rle[i + 1]; }
+  return g;
+}
+
+function tyRefreshOfficialControls() {
+  const box = document.getElementById("tyOfficialBox");
+  const t = tyById(tyState.id);
+  const list = t && window.CWA_TY_MAP_INDEX ? CWA_TY_MAP_INDEX[t.id] : null;
+  tyClearOfficial();
+  if (!list || !list.length) { box.style.display = "none"; return; }
+  box.style.display = "";
+  const sel = document.getElementById("tyOfficial");
+  sel.innerHTML = `<option value="">不顯示</option>` + list.map((e, i) => {
+    const w = tyOffWindow(t, e);
+    return `<option value="${i}">${tyOffLabel(e)}${e[2] === "large" ? "（大雨量刻度 10–1500 mm）" : ""}${w.covered ? "" : w.overlap ? "（逐時資料僅部分涵蓋）" : "（颱風資料期間外）"}</option>`;
+  }).join("");
+  tyOff.defaultNote = `本颱風有 ${list.length} 張氣象署累積雨量圖，選擇後會疊在地圖上（影像為 0.01° 經緯度網格，已依海岸線與縣市界校正位置，平均誤差約 0.1–0.3 像素，即數百公尺內）。顯示官方圖時，本系統內插圖會自動改用官方圖同一套分級與配色，方便直接比對。`;
+  document.getElementById("tyOfficialNote").textContent = tyOff.defaultNote;
+  document.getElementById("tyOfficialSync").disabled = true;
+}
+
+function tyClearOfficial() {
+  tyOff.seq++;
+  if (tyOff.overlay && leafletMap) leafletMap.removeLayer(tyOff.overlay);
+  if (tyOff.control && leafletMap) leafletMap.removeControl(tyOff.control);
+  tyOff.overlay = tyOff.control = tyOff.entry = tyOff.grid = null;
+  if (leafletMap) leafletMap.off("mousemove", tyOffHover);
+  if (mapImageOverlay) mapImageOverlay.setOpacity(HEATMAP_OPACITY);
+  const sel = document.getElementById("tyOfficial");
+  if (sel) sel.value = "";
+}
+
+async function tySetOfficial(idx) {
+  const t = tyById(tyState.id);
+  if (idx === "" || !t) {
+    const had = !!tyOff.overlay;
+    tyClearOfficial();
+    tyRefreshOfficialNote();
+    document.getElementById("tyOfficialSync").disabled = true;
+    if (had && tyState.scale === "auto") runTyphoonMap();
+    return;
+  }
+  const seq = ++tyOff.seq;
+  const note = document.getElementById("tyOfficialNote");
+  note.textContent = "載入官方圖中…";
+  try { if (!(window.CWA_TY_MAPS && CWA_TY_MAPS[t.id])) await loadScriptOnce(`typhoon_maps/maps_${t.y}.js`); }
+  catch (e) { note.textContent = e.message; return; }
+  if (seq !== tyOff.seq) return;
+  const e = CWA_TY_MAPS[t.id][+idx];
+  const F = tyOffFrame(e);
+  const map = ensureMap();
+  if (!map.getPane("officialPane")) {
+    const pane = map.createPane("officialPane");
+    pane.style.zIndex = 450;          // above the interpolated raster, below markers & popups
+    pane.style.pointerEvents = "none"; // station dots underneath stay clickable
+  }
+  if (tyOff.overlay) map.removeLayer(tyOff.overlay);
+  tyOff.entry = e;
+  tyOff.grid = tyDecodeRle(e.rle, F.w * F.h);
+  tyOff.overlay = L.imageOverlay(e.png, [[F.south, F.west], [F.north, F.east]], { pane: "officialPane", opacity: tyOff.opacity, interactive: false }).addTo(map);
+  tyAddOfficialControl(e);
+  map.off("mousemove", tyOffHover).on("mousemove", tyOffHover);
+  tyApplyHideOwn();
+  const w = tyOffWindow(t, [e.start, e.end]);
+  document.getElementById("tyOfficialSync").disabled = !w.covered;
+  if (tyState.scale === "auto") runTyphoonMap(); // switch our colours to the official classes
+  await tyRefreshOfficialNote();
+}
+
+function tyAddOfficialControl(e) {
+  if (tyOff.control) leafletMap.removeControl(tyOff.control);
+  tyOff.control = L.control({ position: "bottomleft" });
+  tyOff.control.onAdd = function () {
+    const div = L.DomUtil.create("div", "map-legend ty-off-legend");
+    const rows = e.colors.map((c, k) => ({ c, k })).reverse().map(({ c, k }) =>
+      `<div class="map-legend-row"><span class="map-legend-swatch" style="background:rgb(${c.join(",")})"></span>${tyOffClassLabel(k, e)}</div>`).join("");
+    div.innerHTML = `<div class="ty-readout" id="tyReadout">將游標移到地圖上可讀取該處數值</div>
+      <div class="map-legend-title">氣象署累積雨量圖 ${e.start.slice(5)}～${e.end.slice(5)}</div><div class="map-legend-body">${rows}</div>`;
+    div.classList.toggle("collapsed", !tyOff.legendOpen);
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    div.querySelector(".map-legend-title").addEventListener("click", () => {
+      tyOff.legendOpen = !tyOff.legendOpen;
+      div.classList.toggle("collapsed", !tyOff.legendOpen);
+    });
+    return div;
+  };
+  tyOff.control.addTo(leafletMap);
+}
+
+// value of the current interpolated map at a point (same IDW as the raster)
+function tyIdwAt(lat, lon) {
+  if (!lastHeatmapPoints || !lastHeatmapPoints.length) return null;
+  const R = (lastHeatmapOpts && lastHeatmapOpts.maxDistKm) || 22;
+  let ws = 0, vs = 0;
+  for (const p of lastHeatmapPoints) {
+    const d = haversineKm(lat, lon, p.lat, p.lon);
+    if (d > R) continue;
+    if (d < 0.05) return p.value;
+    const w = 1 / (d * d); ws += w; vs += w * p.value;
+  }
+  return ws ? vs / ws : null;
+}
+
+function tyOfficialBins() {
+  const e = tyOff.entry;
+  if (!e) return null;
+  if (!e._bins) {
+    const E = tyOffEdges(e);
+    e._bins = e.colors.map((c, k) => ({ min: k === 0 ? 0.5 : E[k], max: E[k + 1] === null ? Infinity : E[k + 1], color: c }));
+  }
+  return e._bins;
+}
+
+function tyOffHover(ev) {
+  const el = document.getElementById("tyReadout");
+  if (!el || !tyOff.grid) return;
+  const k = tyOffGridAt(ev.latlng.lat, ev.latlng.lng);
+  if (k === null) { el.textContent = "（在官方圖範圍外）"; return; }
+  const own = tyIdwAt(ev.latlng.lat, ev.latlng.lng);
+  const def = tyStatDef(tyState.stat);
+  const ownLabel = tyState.stat === "hourly" ? "本系統時段累積" : `本系統${def.short}`;
+  el.innerHTML = `官方圖：<b>${tyOffClassLabel(k)}</b>｜${ownLabel}：<b>${own === null ? "—" : fmt(own, 1) + " mm"}</b>`;
+}
+
+function tyApplyHideOwn() {
+  if (!mapImageOverlay) return;
+  mapImageOverlay.setOpacity(tyOff.hideOwn && tyOff.overlay ? 0 : HEATMAP_OPACITY);
+}
+
+// how well station measurements (hourly sums over the same window) agree with the official map's classes
+async function tyRefreshOfficialNote() {
+  const note = document.getElementById("tyOfficialNote");
+  const t = tyById(tyState.id);
+  const e = tyOff.entry;
+  if (!note || !t) return;
+  if (!e) { note.textContent = tyOff.defaultNote || ""; return; }
+  const w = tyOffWindow(t, [e.start, e.end]);
+  if (!w.covered) {
+    note.textContent = w.overlap
+      ? `此官方圖時段（${e.start.slice(5)}～${e.end.slice(5)}）只有 ${w.overlap}/${w.len} 小時落在颱風資料庫的逐時資料期間內，無法用測站資料比對；仍可疊圖參考。`
+      : `此官方圖時段在颱風資料庫逐時資料期間之外，無法用測站資料比對；仍可疊圖參考。`;
+    return;
+  }
+  let prep;
+  try { prep = await ensureTyHourly(t); } catch (err) { note.textContent = err.message; return; }
+  if (tyOff.entry !== e) return;
+  let n = 0, exact = 0, within = 0;
+  const check = (si, v) => {
+    const s = CWA_STATIONS[si];
+    const k = tyOffGridAt(s[6], s[5]);
+    if (k === null) return;
+    const c = tyOffClassOf(v, e);
+    n++;
+    if (k === c) exact++;
+    if (Math.abs(k - c) <= 1) within++;
+  };
+  for (const [si, c] of prep.cum) check(si, c[w.b + 1] - c[w.a]);
+  if (tyState.zeroFill) {
+    const listed = new Set(prep.cum.keys());
+    CWA_STATIONS.forEach((s, si) => { if (!listed.has(si) && s[7] && s[7] <= t.y && t.y <= s[8]) check(si, 0); });
+  }
+  note.innerHTML = `比對：${n} 個測站在同一時段（${e.start.slice(5)}～${e.end.slice(5)}）的逐時雨量加總，落在官方圖同一分級者 <b>${pct(exact / n, 0)}</b>、相差一級以內 <b>${pct(within / n, 0)}</b>。差異多出現在海岸線（1 公里網格跨陸海）與測站稀疏的山區；官方圖為雷達與雨量站整合之網格產品，數值本就不會與單一測站完全相同。按「本系統改畫同一時段」可並排比較。`;
+}
+
+function tySyncToOfficial() {
+  const t = tyById(tyState.id), e = tyOff.entry;
+  if (!t || !e) return;
+  const w = tyOffWindow(t, [e.start, e.end]);
+  if (!w.covered) return;
+  tyStopPlay(true);
+  tyState.stat = "hourly";
+  tyState.cmp = "";
+  document.getElementById("tyStat").value = "hourly";
+  document.getElementById("tyCompare").value = "";
+  const winSel = document.getElementById("tyWinLen");
+  if (![...winSel.options].some(o => +o.value === w.len)) winSel.insertAdjacentHTML("beforeend", `<option value="${w.len}">${w.len} 小時</option>`);
+  tyState.winLen = w.len;
+  winSel.value = String(w.len);
+  tyState.endIdx = w.b;
+  document.getElementById("tyEnd").value = w.b;
+  tyShowHourlyControls();
+  tyUpdateEndLabel();
+  runTyphoonMap();
+}
+
+function tyOfficialAfterRender() {
+  if (tyOff.overlay) { tyOff.overlay.bringToFront(); tyApplyHideOwn(); }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("tyOfficial").addEventListener("change", e => tySetOfficial(e.target.value));
+  document.getElementById("tyOfficialSync").addEventListener("click", tySyncToOfficial);
+  document.getElementById("tyOfficialOp").addEventListener("input", e => {
+    tyOff.opacity = parseInt(e.target.value, 10) / 100;
+    document.getElementById("tyOfficialOpVal").textContent = e.target.value + "%";
+    if (tyOff.overlay) tyOff.overlay.setOpacity(tyOff.opacity);
+  });
+  document.getElementById("tyHideOwn").addEventListener("change", e => { tyOff.hideOwn = e.target.checked; tyApplyHideOwn(); });
+});

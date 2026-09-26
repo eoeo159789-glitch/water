@@ -534,20 +534,29 @@ function tyUpdateEndLabel() {
   if (t && el) el.textContent = tyWindowLabel(t);
 }
 
+// the playback row is always shown; it drives the map only for the "時段累積" statistic
 function tyShowHourlyControls() {
-  document.getElementById("tyHourlyControls").style.display = tyState.stat === "hourly" ? "" : "none";
+  document.getElementById("tyHourlyControls").classList.toggle("ty-idle", tyState.stat !== "hourly" || !!tyState.cmp);
+}
+// using any playback control switches the map to the hourly statistic (and drops the A–B comparison)
+function tyEnsureHourly() {
+  let changed = false;
+  if (tyState.stat !== "hourly") {
+    tyState.stat = "hourly";
+    document.getElementById("tyStat").value = "hourly";
+    changed = true;
+  }
+  if (tyState.cmp) { tyState.cmp = ""; document.getElementById("tyCompare").value = ""; changed = true; }
+  tyShowHourlyControls();
+  return changed;
 }
 
 function tyTogglePlay() {
   if (tyPlayTimer) { tyStopPlay(); return; }
   const t = tyById(tyState.id);
   if (!t) return;
-  if (tyState.stat !== "hourly") {
-    tyState.stat = "hourly";
-    document.getElementById("tyStat").value = "hourly";
-    tyShowHourlyControls();
-  }
-  if (tyState.cmp) { tyState.cmp = ""; document.getElementById("tyCompare").value = ""; }
+  tyOffStopPlay();
+  tyEnsureHourly();
   if (tyState.endIdx >= t.n - 1) tyState.endIdx = tyState.step === "day" ? tyNextMidnight(t, -1) : 0;
   const slider = document.getElementById("tyEnd");
   document.getElementById("tyPlayBtn").textContent = "❚❚ 暫停";
@@ -621,16 +630,17 @@ function tyInitControls() {
     tyShowHourlyControls();
     rerender();
   });
-  document.getElementById("tyCompare").addEventListener("change", e => { tyStopPlay(true); tyState.cmp = e.target.value; rerender(); });
+  document.getElementById("tyCompare").addEventListener("change", e => { tyStopPlay(true); tyState.cmp = e.target.value; tyShowHourlyControls(); rerender(); });
   document.getElementById("tyRadius").addEventListener("change", e => { tyState.radius = e.target.value; rerender(); });
   document.getElementById("tyScale").addEventListener("change", e => { tyState.scale = e.target.value; rerender(); });
   document.getElementById("tyZeroFill").addEventListener("change", e => { tyState.zeroFill = e.target.checked; rerender(); if (tyOff.entry) tyRefreshOfficialNote(); });
-  document.getElementById("tyWinLen").addEventListener("change", e => { tyState.winLen = parseInt(e.target.value, 10); tyUpdateEndLabel(); rerender(); });
+  document.getElementById("tyWinLen").addEventListener("change", e => { tyState.winLen = parseInt(e.target.value, 10); tyEnsureHourly(); tyUpdateEndLabel(); rerender(); });
   let sliderTimer = null;
   document.getElementById("tyEnd").addEventListener("input", e => {
     tyState.endIdx = parseInt(e.target.value, 10);
     tyUpdateEndLabel();
     if (tyPlayTimer) return;
+    if (tyEnsureHourly()) { runTyphoonMap(); return; }
     clearTimeout(sliderTimer);
     sliderTimer = setTimeout(() => runTyphoonMap({ frame: true }), 60);
   });
@@ -652,17 +662,31 @@ function tyInitControls() {
   document.getElementById("tyDetail").addEventListener("click", e => {
     const tr = e.target.closest(".ty-hist-row");
     if (!tr || tr.dataset.id === tyState.id) return;
-    tyState.id = tr.dataset.id;
-    const t = tyById(tyState.id);
-    document.getElementById("tyYear").value = String(t.y);
-    document.getElementById("tySearch").value = "";
-    tyFillTyphoonSelect();
-    document.getElementById("tySelect").value = tyState.id;
     const keepSi = tyState.si;
-    tyOnTyphoonChanged();
+    tyGoTo(tr.dataset.id);
     tyState.si = keepSi;
     rerender();
   });
+}
+
+// select a typhoon by id (year filter follows); caller re-renders
+function tyGoTo(id) {
+  const t = tyById(id);
+  if (!t) return false;
+  tyState.id = id;
+  document.getElementById("tyYear").value = String(t.y);
+  document.getElementById("tySearch").value = "";
+  tyFillTyphoonSelect();
+  document.getElementById("tySelect").value = id;
+  tyOnTyphoonChanged();
+  return true;
+}
+// from the date-range quick-pick: typhoons without yearbook data open here (id "" = just open the mode)
+let tyPendingId = null;
+function tyOpenFromQuickPick(id) {
+  tyPendingId = id || "";
+  if (state.mapmode === "typhoon") { tyEnterMode(); return; }
+  document.querySelector('#mapModeSeg button[data-mapmode="typhoon"]').click();
 }
 
 // called when the map sub-mode changes
@@ -675,6 +699,11 @@ async function tyEnterMode() {
     return;
   }
   tyInitControls();
+  if (tyPendingId === "") {            // "earlier years": show the full list
+    document.getElementById("tyYear").value = "all";
+    tyFillTyphoonSelect();
+  } else if (tyPendingId) tyGoTo(tyPendingId);
+  tyPendingId = null;
   runTyphoonMap();
 }
 function tyLeaveMode() {
@@ -746,6 +775,7 @@ function tyRefreshOfficialControls() {
 }
 
 function tyClearOfficial() {
+  tyOffStopPlay();
   tyOff.seq++;
   if (tyOff.overlay && leafletMap) leafletMap.removeLayer(tyOff.overlay);
   if (tyOff.control && leafletMap) leafletMap.removeControl(tyOff.control);
@@ -754,6 +784,12 @@ function tyClearOfficial() {
   if (mapImageOverlay) mapImageOverlay.setOpacity(HEATMAP_OPACITY);
   const sel = document.getElementById("tyOfficial");
   if (sel) sel.value = "";
+  const lbl = document.getElementById("tyOffPlayLabel");
+  if (lbl) lbl.textContent = "";
+  const note = document.getElementById("tyOfficialNote");
+  if (note && tyOff.defaultNote) note.textContent = tyOff.defaultNote;
+  const sync = document.getElementById("tyOfficialSync");
+  if (sync) sync.disabled = true;
 }
 
 async function tySetOfficial(idx) {
@@ -910,12 +946,49 @@ function tySyncToOfficial() {
   runTyphoonMap();
 }
 
+// step through the official daily maps of this typhoon (optionally redrawing our map for the same window)
+let tyOffPlayTimer = null;
+function tyOffTogglePlay() {
+  if (tyOffPlayTimer) { tyOffStopPlay(); return; }
+  const sel = document.getElementById("tyOfficial");
+  const n = sel.options.length - 1;   // first option = 不顯示
+  if (n < 1) return;
+  tyStopPlay(true);
+  let i = sel.value === "" ? 0 : +sel.value + 1;
+  if (i >= n) i = 0;
+  document.getElementById("tyOffPlayBtn").textContent = "❚❚ 暫停";
+  const label = document.getElementById("tyOffPlayLabel");
+  tyOffPlayTimer = -1;
+  const step = async () => {
+    if (!tyOffPlayTimer) return;
+    sel.value = String(i);
+    label.textContent = `第 ${i + 1}/${n} 張：${sel.options[i + 1].textContent}`;
+    await tySetOfficial(String(i));
+    if (!tyOffPlayTimer) return;
+    if (document.getElementById("tyOffPlaySync").checked) tySyncToOfficial();
+    if (i >= n - 1) { tyOffStopPlay(true); return; }
+    i++;
+    tyOffPlayTimer = setTimeout(step, +document.getElementById("tyOffPlaySpeed").value || 2000);
+  };
+  tyOffPlayTimer = setTimeout(step, 0);
+}
+function tyOffStopPlay(keepLabel) {
+  if (!tyOffPlayTimer) return;
+  if (tyOffPlayTimer !== -1) clearTimeout(tyOffPlayTimer);
+  tyOffPlayTimer = null;
+  const b = document.getElementById("tyOffPlayBtn");
+  if (b) b.textContent = "▶ 逐張播放官方圖";
+  const l = document.getElementById("tyOffPlayLabel");
+  if (l && !keepLabel) l.textContent = "";
+}
+
 function tyOfficialAfterRender() {
   if (tyOff.overlay) { tyOff.overlay.bringToFront(); tyApplyHideOwn(); }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("tyOfficial").addEventListener("change", e => tySetOfficial(e.target.value));
+  document.getElementById("tyOfficial").addEventListener("change", e => { tyOffStopPlay(); tySetOfficial(e.target.value); });
+  document.getElementById("tyOffPlayBtn").addEventListener("click", tyOffTogglePlay);
   document.getElementById("tyOfficialSync").addEventListener("click", tySyncToOfficial);
   document.getElementById("tyOfficialOp").addEventListener("input", e => {
     tyOff.opacity = parseInt(e.target.value, 10) / 100;

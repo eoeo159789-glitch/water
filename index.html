@@ -165,8 +165,9 @@
             <option value="ext">延伸級距（續分至 2,000+ mm）</option>
           </select></label>
         </div>
-        <div class="row" id="tyHourlyControls" style="display:none;">
-          <label class="field">累積時數<select id="tyWinLen"></select></label>
+        <div class="row ty-play-row" id="tyHourlyControls">
+          <span class="ty-play-title">逐時／逐日播放（氣象署測站逐時資料）</span>
+          <label class="field">每格顯示<select id="tyWinLen"></select></label>
           <label class="field">播放間隔<select id="tyStep">
             <option value="1">逐時（每 1 小時）</option>
             <option value="3">每 3 小時</option>
@@ -178,11 +179,20 @@
             <input type="range" id="tyEnd" min="0" max="0" value="0" aria-label="時段結束時間">
             <span class="badge" id="tyEndLabel"></span>
           </div>
+          <p class="ty-play-hint">按「播放」或拖曳時間軸，地圖會改為「指定時段累積」並依時間變化；「每格顯示」選「自事件開始累積」看雨量逐步累加，選 1／24 小時看當時雨量。「播放間隔」選逐日，每格為當日 00–24 時雨量。</p>
         </div>
         <div class="ty-official" id="tyOfficialBox" style="display:none;">
           <div class="row">
             <label class="field ty-grow">氣象署累積雨量圖（官方圖檔，已校正疊合）<select id="tyOfficial"></select></label>
             <button class="ghost" id="tyOfficialSync" type="button">本系統改畫同一時段</button>
+          </div>
+          <div class="row ty-off-play">
+            <button class="ghost" id="tyOffPlayBtn" type="button">▶ 逐張播放官方圖</button>
+            <label class="field">間隔<select id="tyOffPlaySpeed">
+              <option value="1200">1.2 秒</option><option value="2000" selected>2 秒</option><option value="3500">3.5 秒</option>
+            </select></label>
+            <label class="check-row" style="margin:0;"><input type="checkbox" id="tyOffPlaySync" checked> 本系統同步畫同一時段（方便逐日比對）</label>
+            <span class="badge" id="tyOffPlayLabel"></span>
           </div>
           <div class="row">
             <div class="op-row ty-official-op"><span class="op-lbl">官方圖透明度</span><input type="range" id="tyOfficialOp" min="0" max="100" value="80"><span class="op-val" id="tyOfficialOpVal">80%</span></div>

@@ -27,3 +27,18 @@ const TYPHOON_PERIODS = [
   { code: "202421", name_zh: "康芮", name_en: "KONG-REY", intensity: "強烈", start: "2024-10-29", end: "2024-11-01" },
   { code: "202425", name_zh: "天兔", name_en: "USAGI", intensity: "中度", start: "2024-11-14", end: "2024-11-16" },
 ];
+
+/* 2025 年以後的颱風：水利署水文年報尚未納入（本系統年報資料只到 2024），
+   快選時改開「颱風事件雨量」模式，以中央氣象署颱風資料庫測站逐時資料繪製。
+   日期為警報期間；未提供警報期間者取逐時資料期間。 */
+const TYPHOON_PERIODS_CWA_ONLY = [
+  { id: "2025DANAS", name_zh: "丹娜絲", name_en: "DANAS", start: "2025-07-05", end: "2025-07-07" },
+  { id: "2025WIPHA", name_zh: "薇帕", name_en: "WIPHA", start: "2025-07-18", end: "2025-07-19" },
+  { id: "2025PODUL", name_zh: "楊柳", name_en: "PODUL", start: "2025-08-12", end: "2025-08-14" },
+  { id: "2025RAGASA", name_zh: "樺加沙", name_en: "RAGASA", start: "2025-09-21", end: "2025-09-23" },
+  { id: "2025FUNG-WONG", name_zh: "鳳凰", name_en: "FUNG-WONG", start: "2025-11-10", end: "2025-11-12" },
+  { id: "2026BAVI", name_zh: "巴威", name_en: "BAVI", start: "2026-07-09", end: "2026-07-12" },
+  { id: "2026NOUL", name_zh: "紅霞", name_en: "NOUL", start: "2026-07-23", end: "2026-07-25" },
+  { id: "2026DOLPHIN", name_zh: "白海豚", name_en: "DOLPHIN", start: "2026-08-07", end: "2026-08-09" },
+  { id: "2026SAUDEL", name_zh: "沙德爾", name_en: "SAUDEL", start: "2026-08-27", end: "2026-08-28" },
+];

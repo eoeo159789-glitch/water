@@ -485,12 +485,34 @@ function populateTyphoonSelects() {
   document.querySelectorAll("select.typhoon-pick").forEach(sel => {
     if (sel.dataset.populated) return;
     sel.dataset.populated = "1";
+    const g1 = document.createElement("optgroup");
+    g1.label = "2020–2024（水利署年報資料期間）";
     TYPHOON_PERIODS.forEach((t, i) => {
       const opt = document.createElement("option");
       opt.value = i;
       opt.textContent = `${t.start.slice(0, 4)} ${t.name_zh}(${t.name_en}) ${t.start}~${t.end}`;
-      sel.appendChild(opt);
+      g1.appendChild(opt);
     });
+    sel.appendChild(g1);
+    // later (and earlier) typhoons have no yearbook data: on the map they open the typhoon-event mode (CWA stations)
+    if (typeof TYPHOON_PERIODS_CWA_ONLY === "undefined") return;
+    const onMap = sel.dataset.start === "mStart";
+    const g2 = document.createElement("optgroup");
+    g2.label = onMap ? "2025 年以後（水利署年報尚未納入）→ 改以氣象署測站資料繪製" : "2025 年以後：水利署年報尚未納入，無測站資料可查";
+    TYPHOON_PERIODS_CWA_ONLY.slice().reverse().forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = "cwa:" + t.id;
+      opt.disabled = !onMap;
+      opt.textContent = `${t.start.slice(0, 4)} ${t.name_zh}(${t.name_en}) ${t.start}~${t.end}`;
+      g2.appendChild(opt);
+    });
+    sel.appendChild(g2);
+    if (onMap) {
+      const g3 = document.createElement("optgroup");
+      g3.label = "更早年份";
+      g3.innerHTML = `<option value="cwa:">1958–2019 颱風 → 開啟「颱風事件雨量」模式選擇</option>`;
+      sel.appendChild(g3);
+    }
   });
 }
 
@@ -544,6 +566,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target.matches("select.typhoon-pick")) {
       const idx = e.target.value;
       if (idx === "") return;
+      if (idx.startsWith("cwa:")) {   // no yearbook data: switch to the typhoon-event map (CWA stations)
+        e.target.value = "";
+        tyOpenFromQuickPick(idx.slice(4));
+        return;
+      }
       const t = TYPHOON_PERIODS[idx];
       const startEl = document.getElementById(e.target.dataset.start);
       const endEl = document.getElementById(e.target.dataset.end);

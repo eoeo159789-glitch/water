@@ -129,6 +129,7 @@ header.top p {
   margin-bottom: 10px;
 }
 .row:last-child { margin-bottom: 0; }
+.row.ty-play-row { margin-bottom: 10px; }
 
 .seg {
   display: inline-flex;
@@ -563,3 +564,11 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 #wraPlayRow select { max-width: 100%; text-overflow: ellipsis; }
 label.field { max-width: 100%; min-width: 0; }
 label.field select { max-width: 100%; }
+/* typhoon-mode playback row: always visible */
+.ty-play-row { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 2px; margin: 0 0 10px; background: var(--surface-2); align-items: flex-end; }
+.ty-play-title { flex: 1 0 100%; font-size: 0.82rem; font-weight: 600; color: var(--text-primary); margin-bottom: -2px; }
+.ty-play-hint { flex: 1 0 100%; font-size: 0.76rem; color: var(--text-secondary); line-height: 1.5; margin: 0 0 6px; }
+.ty-play-row.ty-idle .ty-play-title::after { content: "（目前地圖顯示其他統計量，按播放後切換）"; font-weight: 400; color: var(--text-secondary); margin-left: 6px; }
+.ty-off-play { align-items: center; }
+.ty-off-play .badge { font-variant-numeric: tabular-nums; max-width: 100%; white-space: normal; }
+.ty-off-play .badge:empty { display: none; }

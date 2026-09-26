@@ -374,7 +374,7 @@ function renderRainfallHeatmap(points, diverging, opts) {
   rctx.drawImage(mask, 0, 0);
   rctx.globalCompositeOperation = "source-over";
 
-  return { dataUrl: raster.toDataURL(), bounds: [[minLat, minLon], [maxLat, maxLon]] };
+  return { dataUrl: opts.noUrl ? null : raster.toDataURL(), canvas: raster, bounds: [[minLat, minLon], [maxLat, maxLon]] };
 }
 
 function clearMapLayers() {
@@ -787,26 +787,71 @@ function wraUpdatePlayUi(fromRefresh) {
                           : "年報為日雨量，逐日播放用水利署測站；逐時播放僅在所選期間與颱風事件重疊時提供（氣象署颱風逐時資料）。");
   wraPlayLabel();
 }
-function wraPlayLabel() {
-  const all = wraFrames();
-  const i = +document.getElementById("wraPlayIdx").value;
-  const mode = document.getElementById("wraPlayMode").value;
-  const el = document.getElementById("wraPlayLabelEl");
-  if (!all.length) { el.textContent = state.mapgran === "day" ? "單日僅能逐時播放（需與颱風逐時資料重疊）" : "請先選擇有效的月份或區間"; return; }
-  const st = wraStep();
+// text describing frame i of the current playback
+function wraLabelAt(i, all, st, mode) {
+  all = all || wraFrames(); st = st || wraStep(); mode = mode || document.getElementById("wraPlayMode").value;
   if (st.kind === "cday") {
     const x = all[i], note = x.hours < 24 ? `，僅 ${x.hours} 小時資料` : "";
-    el.textContent = mode === "cum" ? `${all[0].d} ～ ${x.d}（第 ${i + 1}/${all.length} 天累積${note}）` : `${x.d}（第 ${i + 1}/${all.length} 天${note}）`;
-    return;
+    return mode === "cum" ? `${all[0].d} ～ ${x.d}（第 ${i + 1}/${all.length} 天累積${note}）` : `${x.d}（第 ${i + 1}/${all.length} 天${note}）`;
   }
   if (st.kind === "hour") {
     const t = st.t, h = all[i], h0 = all[0];
     const begin = new Date(tyHourDate(t, h0).getTime() - 3600e3);
     const b = `${pad2(begin.getUTCMonth() + 1)}-${pad2(begin.getUTCDate())} ${pad2(begin.getUTCHours())}:00`;
-    el.textContent = mode === "cum" ? `${b} ～ ${tyFmtHour(t, h)}（第 ${i + 1}/${all.length} 小時累積）` : `${tyFmtHour(t, h)} 止的 1 小時（第 ${i + 1}/${all.length} 小時）`;
-    return;
+    return mode === "cum" ? `${b} ～ ${tyFmtHour(t, h)}（第 ${i + 1}/${all.length} 小時累積）` : `${tyFmtHour(t, h)} 止的 1 小時（第 ${i + 1}/${all.length} 小時）`;
   }
-  el.textContent = mode === "cum" ? `${all[0]} ～ ${all[i]}（第 ${i + 1}/${all.length} 天累積）` : `${all[i]}（第 ${i + 1}/${all.length} 天）`;
+  return mode === "cum" ? `${all[0]} ～ ${all[i]}（第 ${i + 1}/${all.length} 天累積）` : `${all[i]}（第 ${i + 1}/${all.length} 天）`;
+}
+function wraPlayLabel() {
+  const all = wraFrames();
+  const i = +document.getElementById("wraPlayIdx").value;
+  const el = document.getElementById("wraPlayLabelEl");
+  if (!all.length) { el.textContent = state.mapgran === "day" ? "單日僅能逐時播放（需與颱風逐時資料重疊）" : "請先選擇有效的月份或區間"; return; }
+  el.textContent = wraLabelAt(i, all);
+}
+// points + captions for frame i (data must already be loaded)
+function wraFramePoints(i, all, st, mode) {
+  if (st.kind === "cday") {
+    const x = all[i], a = mode === "cum" ? all[0].a : x.a;
+    return { P: cwaHourPoints(st.t, a, x.b), src: "cday",
+      title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
+      label: mode === "cum" ? `${all[0].d}～${x.d} 累積，氣象署測站` : `${x.d} 當日雨量，氣象署測站`,
+      tip: mode === "cum" ? `至 ${x.d} 累積` : x.d };
+  }
+  if (st.kind === "hour") {
+    const a = mode === "cum" ? all[0] : all[i], b = all[i];
+    return { P: cwaHourPoints(st.t, a, b), src: "hour",
+      title: mode === "cum" ? "自起始時累積 (mm)" : "時雨量 (mm)",
+      label: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時雨量`,
+      tip: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時` };
+  }
+  const ds = mode === "cum" ? all.slice(0, i + 1) : [all[i]];
+  return { P: wraPoints(ds), src: "day",
+    title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
+    label: mode === "cum" ? `${all[0]}～${all[i]} 累積` : `${all[i]} 當日雨量`,
+    tip: mode === "cum" ? `至 ${all[i]} 累積` : all[i] };
+}
+async function wraEnsureAnimData(all, st) {
+  if (st.kind === "hour" || st.kind === "cday") await ensureTyHourly(st.t);
+  else await hyEnsure("rain", hyYearsOfDates(all));
+}
+// one colour scale for a whole animation: any frame past 350 mm switches to the extended bins
+function wraSetAnimScale(all, st, mode) {
+  WRA_BINS_OVERRIDE = null;
+  if (typeof TY_EXT_BINS === "undefined") return;
+  let maxV = 0;
+  const pmax = P => Math.max(0, ...P.points.map(p => p.value));
+  if (st.kind === "hour") {
+    maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0], all[all.length - 1])) : 0;
+  } else if (st.kind === "cday") {
+    maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0].a, all[all.length - 1].b))
+                          : Math.max(...all.map(x => pmax(cwaHourPoints(st.t, x.a, x.b))));
+  } else if (mode === "cum") {
+    maxV = Math.max(0, ...RAINFALL.map(s => wraRainSum(s, all) || 0));
+  } else {
+    maxV = Math.max(0, ...RAINFALL.map(s => Math.max(0, ...all.map(d => s.daily[d] || 0))));
+  }
+  if (maxV > 350) WRA_BINS_OVERRIDE = TY_EXT_BINS;
 }
 async function wraRenderFrame(light) {
   const all = wraFrames();
@@ -814,36 +859,9 @@ async function wraRenderFrame(light) {
   const i = +document.getElementById("wraPlayIdx").value;
   const mode = document.getElementById("wraPlayMode").value;
   const st = wraStep();
-  if (st.kind === "cday") {
-    await ensureTyHourly(st.t);
-    const x = all[i], a = mode === "cum" ? all[0].a : x.a;
-    renderRainPointsMap(cwaHourPoints(st.t, a, x.b), {
-      light, src: "cday",
-      title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
-      label: mode === "cum" ? `${all[0].d}～${x.d} 累積，氣象署測站` : `${x.d} 當日雨量，氣象署測站`,
-      tip: mode === "cum" ? `至 ${x.d} 累積` : x.d,
-    });
-    return;
-  }
-  if (st.kind === "hour") {
-    await ensureTyHourly(st.t);
-    const a = mode === "cum" ? all[0] : all[i], b = all[i];
-    renderRainPointsMap(cwaHourPoints(st.t, a, b), {
-      light, src: "hour",
-      title: mode === "cum" ? "自起始時累積 (mm)" : "時雨量 (mm)",
-      label: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時雨量`,
-      tip: mode === "cum" ? `至 ${tyFmtHour(st.t, b)} 累積` : `${tyFmtHour(st.t, b)} 止 1 小時`,
-    });
-    return;
-  }
-  const ds = mode === "cum" ? all.slice(0, i + 1) : [all[i]];
-  await hyEnsure("rain", hyYearsOfDates(ds));
-  renderWraRainMap(ds, {
-    light,
-    title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
-    label: mode === "cum" ? `${all[0]}～${all[i]} 累積` : `${all[i]} 當日雨量`,
-    tip: mode === "cum" ? `至 ${all[i]} 累積` : all[i],
-  });
+  await wraEnsureAnimData(all, st);
+  const f = wraFramePoints(i, all, st, mode);
+  renderRainPointsMap(f.P, { light, src: f.src, title: f.title, label: f.label, tip: f.tip });
 }
 async function wraTogglePlay() {
   if (wraPlayTimer) { wraStopPlay(); return; }
@@ -852,28 +870,9 @@ async function wraTogglePlay() {
   const sl = document.getElementById("wraPlayIdx");
   const mode = document.getElementById("wraPlayMode").value;
   const st = wraStep();
-  if (st.kind === "hour" || st.kind === "cday") await ensureTyHourly(st.t);
-  else {
-    try { await hyEnsure("rain", hyYearsOfDates(all)); }
-    catch (e) { document.getElementById("mapStatus").textContent = e.message; return; }
-  }
-  // one colour scale for the whole animation: any frame past 350 mm switches to the extended bins
-  WRA_BINS_OVERRIDE = null;
-  if (typeof TY_EXT_BINS !== "undefined") {
-    let maxV = 0;
-    const pmax = P => Math.max(0, ...P.points.map(p => p.value));
-    if (st.kind === "hour") {
-      maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0], all[all.length - 1])) : 0;
-    } else if (st.kind === "cday") {
-      maxV = mode === "cum" ? pmax(cwaHourPoints(st.t, all[0].a, all[all.length - 1].b))
-                            : Math.max(...all.map(x => pmax(cwaHourPoints(st.t, x.a, x.b))));
-    } else if (mode === "cum") {
-      maxV = Math.max(0, ...RAINFALL.map(s => wraRainSum(s, all) || 0));
-    } else {
-      maxV = Math.max(0, ...RAINFALL.map(s => Math.max(0, ...all.map(d => s.daily[d] || 0))));
-    }
-    if (maxV > 350) WRA_BINS_OVERRIDE = TY_EXT_BINS;
-  }
+  try { await wraEnsureAnimData(all, st); }
+  catch (e) { document.getElementById("mapStatus").textContent = e.message; return; }
+  wraSetAnimScale(all, st, mode);
   if (+sl.value >= all.length - 1) sl.value = 0;
   document.getElementById("wraPlayBtn").textContent = "❚❚ 暫停";
   clearMapLayers(); // start from a fresh layer set (legend matches the chosen scale)

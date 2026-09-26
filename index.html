@@ -142,6 +142,11 @@
             <input type="range" id="wraPlayIdx" min="0" max="0" value="0" aria-label="播放時間">
             <span class="badge" id="wraPlayLabelEl"></span>
           </div>
+          <div class="gif-row">
+            <label class="field">GIF 寬度<select id="wraGifSize"><option value="360">小（約 470 px）</option><option value="480" selected>中（約 600 px）</option><option value="640">大（約 790 px）</option></select></label>
+            <button class="ghost" id="wraGifBtn" type="button">⬇ 下載 GIF 動畫</button>
+            <span class="gif-msg" id="wraGifMsg"></span>
+          </div>
           <p class="ty-hint" id="wraPlayNote" style="margin:0;flex-basis:100%;"></p>
         </div>
       </div>
@@ -195,6 +200,11 @@
             <button class="ghost" id="tyPlayBtn" type="button">▶ 播放</button>
             <input type="range" id="tyEnd" min="0" max="0" value="0" aria-label="時段結束時間">
             <span class="badge" id="tyEndLabel"></span>
+          </div>
+          <div class="gif-row">
+            <label class="field">GIF 寬度<select id="tyGifSize"><option value="360">小（約 470 px）</option><option value="480" selected>中（約 600 px）</option><option value="640">大（約 790 px）</option></select></label>
+            <button class="ghost" id="tyGifBtn" type="button">⬇ 下載 GIF 動畫</button>
+            <span class="gif-msg" id="tyGifMsg"></span>
           </div>
           <p class="ty-play-hint">按「播放」或拖曳時間軸，地圖會改為「指定時段累積」並依時間變化；「每格顯示」選「自事件開始累積」看雨量逐步累加，選 1／24 小時看當時雨量。「播放間隔」選逐日，每格為當日 00–24 時雨量。</p>
         </div>
@@ -361,5 +371,6 @@
 <script src="typhoon.js"></script>
 <script src="audit.js"></script>
 <script src="locate.js"></script>
+<script src="gifexport.js"></script>
 </body>
 </html>

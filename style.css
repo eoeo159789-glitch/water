@@ -621,3 +621,44 @@ body.mode-map #mapCanvas { height: calc(100vh - 225px); min-height: 480px; margi
 .ev-st-table button { padding: 3px 10px; font-size: 0.76rem; white-space: nowrap; }
 .ev-st-table tr.sel td { background: color-mix(in srgb, var(--series-1) 12%, transparent); }
 .cov-ok { color: var(--good); } .cov-part { color: var(--warn-2, #b7791f); } .cov-no { color: var(--text-muted); }
+.gif-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; flex: 1 0 100%; margin: 4px 0 6px; }
+.gif-row select { font-size: 0.8rem; }
+@media (pointer: coarse), (max-width: 900px) { .gif-row select { font-size: 16px; } }
+.gif-msg { font-size: 0.76rem; color: var(--text-secondary); align-self: center; }
+
+/* ---------- v17: responsive / touch ---------- */
+.badge:empty { display: none; }
+@media (pointer: coarse), (max-width: 900px) {
+  /* 16px text in form fields keeps iOS Safari from zooming the page on focus */
+  input[type="text"], input[type="date"], input[type="number"], input[type="search"], select, textarea { font-size: 16px; min-height: 40px; }
+  button { min-height: 40px; }
+  .seg button { min-height: 38px; }
+  input[type="checkbox"] { width: 20px; height: 20px; flex: 0 0 auto; }
+  input[type="range"] { height: 30px; }
+  .loc-pop button, .ev-st-table button { min-height: 34px; }
+  .locate-row select { font-size: 16px; }
+  .cs-remove { min-width: 36px; }
+}
+@media (max-width: 640px) {
+  .app { padding: 12px 10px 36px; }
+  header.top h1 { font-size: 1.15rem; }
+  header.top p { font-size: 0.8rem; }
+  .theme-toggle { padding: 4px 10px; font-size: 0.74rem; }
+  .panel { padding: 12px; }
+  label.field { flex: 1 1 140px; }
+  label.field select, label.field input { width: 100%; }
+  #stationPanel label.field { flex-basis: 100%; }
+  .seg { flex-wrap: wrap; }
+  .chart-wrap { height: 280px; }
+  /* nearby-station list: one card per station */
+  .ev-st-table thead { display: none; }
+  .ev-st-table, .ev-st-table tbody, .ev-st-table tr, .ev-st-table td { display: block; width: 100%; }
+  .ev-st-table tr { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 8px; padding: 6px 10px; background: var(--surface-1); position: relative; }
+  .ev-st-table td { border: 0 !important; padding: 1px 0; text-align: left !important; background: transparent !important; }
+  .ev-st-table tr.sel { background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1)); }
+  label.field.ev-grow { flex-basis: 100%; }
+  .ev-st-table td.c-name { font-weight: 600; padding-right: 90px; }
+  .ev-st-table td[data-label]::before { content: attr(data-label) "："; color: var(--text-muted); }
+  .ev-st-table td.c-act { position: absolute; top: 6px; right: 8px; width: auto; }
+  .ev-locate .table-scroll { overflow: visible; }
+}

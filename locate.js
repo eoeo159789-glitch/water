@@ -241,12 +241,12 @@ function evRenderStationList(autoPick) {
   el.innerHTML = `<div class="table-scroll"><table class="data-table ev-st-table">
     <thead><tr><th>${kind === "level" ? "水位" : "流量"}站</th><th>流域／河川</th><th class="num">距離</th><th>資料年份</th><th>比較期間資料</th><th></th></tr></thead>
     <tbody>${evLocHits.map((x, i) => `<tr data-i="${i}"${state.stationId === x.s.id && state.dataType === kind ? ' class="sel"' : ""}>
-      <td>${escapeHtml(x.s.name_zh)}（${escapeHtml(x.s.code || "")}）</td>
-      <td>${escapeHtml(x.s.basin_zh || "—")}${x.s.tributary_zh && x.s.tributary_zh !== x.s.basin_zh ? "／" + escapeHtml(x.s.tributary_zh) : ""}</td>
-      <td class="num">${x.d.toFixed(1)} km</td>
-      <td>${hyYearRanges(locYears(x.s, kind))}</td>
-      <td class="${x.cov.cls}">${x.cov.text}</td>
-      <td><button class="ghost" type="button" data-ev-pick="${i}">${x === best ? "選用（建議）" : "選用"}</button></td></tr>`).join("")}</tbody></table></div>
+      <td class="c-name">${escapeHtml(x.s.name_zh)}（${escapeHtml(x.s.code || "")}）</td>
+      <td data-label="流域／河川">${escapeHtml(x.s.basin_zh || "—")}${x.s.tributary_zh && x.s.tributary_zh !== x.s.basin_zh ? "／" + escapeHtml(x.s.tributary_zh) : ""}</td>
+      <td class="num" data-label="距離">${x.d.toFixed(1)} km</td>
+      <td data-label="資料年份">${hyYearRanges(locYears(x.s, kind))}</td>
+      <td class="${x.cov.cls}" data-label="比較期間">${x.cov.text}</td>
+      <td class="c-act"><button class="ghost" type="button" data-ev-pick="${i}">${x === best ? "選用（建議）" : "選用"}</button></td></tr>`).join("")}</tbody></table></div>
     <p class="loc-status">「建議」為距離最近且施工前後皆有資料的測站。最近的測站不一定位於工程所在的同一條河川或其下游，請依流域／河川欄核對；流量站較水位站少，距離可能較遠。</p>`;
   if (autoPick && best) evPickStation(best);
   return best;

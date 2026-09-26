@@ -15,6 +15,8 @@ let levelStationsLayer = null;   // static reference layer: all water-level stat
 let dischargeStationsLayer = null; // static reference layer: all discharge station locations
 let lastHeatmapPoints = null;   // for zoom-triggered re-render (single rainfall mode)
 let lastHeatmapDiverging = null; // {maxAbs} when the last heatmap was a diverging diff map
+let lastHeatmapOpts = null;      // {maxDistKm} used by the last heatmap (typhoon mode uses adaptive radius)
+let layersControlRef = null;     // Leaflet layer control, so later-loaded layers (typhoon stations) can be added
 let lastMapRows = null;         // for CSV export
 let zoomRenderTimer = null;
 
@@ -51,7 +53,9 @@ let RAIN_MIN_THRESHOLD = 0.5;     // mm; below this, no color is drawn
 let DIVERGING_POS_COLOR = [200, 0, 0];   // period-diff "increase" color
 let DIVERGING_NEG_COLOR = [0, 80, 210];  // period-diff "decrease" color
 
-function activeRainBins() { return CUSTOM_RAIN_BINS || CWA_RAIN_BINS; }
+function activeRainBins() {
+  return CUSTOM_RAIN_BINS || (typeof tyActiveBins === "function" ? tyActiveBins() : null) || CWA_RAIN_BINS;
+}
 
 function rainColorFor(v) {
   if (v === null || v === undefined || v < RAIN_MIN_THRESHOLD) return null;
@@ -85,7 +89,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 function ensureMap() {
   if (leafletMap) return leafletMap;
-  leafletMap = L.map("mapCanvas", { attributionControl: false, zoomControl: true });
+  leafletMap = L.map("mapCanvas", { attributionControl: false, zoomControl: true, zoomSnap: 0.25 });
   L.control.attribution({ prefix: false, position: "bottomright" }).addTo(leafletMap);
   leafletMap.setView([23.6, 120.95], 8);
 
@@ -148,21 +152,23 @@ function ensureMap() {
   overlays["雨量站位置"] = rainStationsLayer;
   overlays["水位站位置"] = levelStationsLayer;
   overlays["流量站位置"] = dischargeStationsLayer;
-  L.control.layers(baseLayers, overlays, { position: "topright", collapsed: true }).addTo(leafletMap);
+  layersControlRef = L.control.layers(baseLayers, overlays, { position: "topright", collapsed: true }).addTo(leafletMap);
   addFullscreenControl(leafletMap);
+  if (typeof tyAddStationRefLayer === "function") tyAddStationRefLayer(); // no-op until typhoon data is loaded
+  if (typeof prjRefreshLayer === "function") prjRefreshLayer(true);     // imported project points, if any
 
   leafletMap.on("baselayerchange", (e) => {
     const isBlank = e.layer === blankBaseLayer;
     taiwanGeoLayer.setStyle({ fillOpacity: isBlank ? 0.25 : 0, opacity: isBlank ? 1 : 0 });
   });
 
-  leafletMap.fitBounds(taiwanGeoLayer.getBounds(), { padding: [10, 10] });
+  leafletMap.fitBounds(taiwanGeoLayer.getBounds(), { padding: [10, 10], animate: false });
 
   leafletMap.on("zoomend", () => {
     if (!lastHeatmapPoints) return;
     clearTimeout(zoomRenderTimer);
     zoomRenderTimer = setTimeout(() => {
-      const { dataUrl, bounds } = renderRainfallHeatmap(lastHeatmapPoints, lastHeatmapDiverging);
+      const { dataUrl, bounds } = renderRainfallHeatmap(lastHeatmapPoints, lastHeatmapDiverging, lastHeatmapOpts);
       if (mapImageOverlay) leafletMap.removeLayer(mapImageOverlay);
       mapImageOverlay = L.imageOverlay(dataUrl, bounds, { opacity: HEATMAP_OPACITY }).addTo(leafletMap);
       if (mapMarkersLayer) mapMarkersLayer.bringToFront();
@@ -268,19 +274,21 @@ function resolutionForZoom() {
   return Math.max(420, Math.min(w, 1600));
 }
 
-function renderRainfallHeatmap(points, diverging) {
+function renderRainfallHeatmap(points, diverging, opts) {
   // points: [{lat, lon, value}]; diverging: {maxAbs} to use a blue/red diff scale, or falsy for the CWA scale
+  // opts: { maxDistKm (IDW search radius, default 22), width (raster width px, default by zoom) }
+  opts = opts || {};
   const geoB = taiwanGeoLayer.getBounds();
   const minLat = geoB.getSouth() - 0.05, maxLat = geoB.getNorth() + 0.05;
   const minLon = geoB.getWest() - 0.05, maxLon = geoB.getEast() + 0.05;
-  const width = resolutionForZoom(), height = Math.round(width * (maxLat - minLat) / (maxLon - minLon));
+  const width = opts.width || resolutionForZoom(), height = Math.round(width * (maxLat - minLat) / (maxLon - minLon));
 
   const raster = document.createElement("canvas");
   raster.width = width; raster.height = height;
   const rctx = raster.getContext("2d");
   const imgData = rctx.createImageData(width, height);
 
-  const maxDistKm = 22;
+  const maxDistKm = opts.maxDistKm || 22;
   const power = 2;
   // cheap equirectangular approximation (Taiwan is small enough this is accurate to <0.1%)
   const latRad = (minLat + maxLat) / 2 * Math.PI / 180;
@@ -289,21 +297,39 @@ function renderRainfallHeatmap(points, diverging) {
   const maxDegLat = maxDistKm / kmPerDegLat;
   const maxDegLon = maxDistKm / kmPerDegLon;
 
+  // spatial grid index: cell size = search radius, so each pixel only needs the 3x3 neighbouring
+  // cells (keeps ~1,000-station typhoon maps and hourly animation fast; results identical to a full scan)
+  const nx = Math.max(1, Math.ceil((maxLon - minLon) / maxDegLon));
+  const ny = Math.max(1, Math.ceil((maxLat - minLat) / maxDegLat));
+  const cells = Array.from({ length: nx * ny }, () => []);
+  for (const p of points) {
+    const gx = Math.floor((p.lon - minLon) / maxDegLon), gy = Math.floor((p.lat - minLat) / maxDegLat);
+    if (gx < -1 || gy < -1 || gx > nx || gy > ny) continue; // too far outside the raster to reach any pixel
+    cells[Math.min(ny - 1, Math.max(0, gy)) * nx + Math.min(nx - 1, Math.max(0, gx))].push(p);
+  }
+
   for (let py = 0; py < height; py++) {
     const lat = maxLat - (py / height) * (maxLat - minLat);
+    const gy = Math.min(ny - 1, Math.floor((lat - minLat) / maxDegLat));
     for (let px = 0; px < width; px++) {
       const lon = minLon + (px / width) * (maxLon - minLon);
+      const gx = Math.min(nx - 1, Math.floor((lon - minLon) / maxDegLon));
       let wSum = 0, vSum = 0, minD = Infinity, hit = false;
-      for (const p of points) {
-        const dLat = Math.abs(p.lat - lat), dLon = Math.abs(p.lon - lon);
-        if (dLat > maxDegLat || dLon > maxDegLon) continue;
-        const dx = dLon * kmPerDegLon, dy = dLat * kmPerDegLat;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < minD) minD = d;
-        if (d < 0.05) { wSum = 1; vSum = p.value; hit = true; break; }
-        if (d <= maxDistKm) {
-          const w = 1 / Math.pow(d, power);
-          wSum += w; vSum += w * p.value;
+      search:
+      for (let cy = Math.max(0, gy - 1); cy <= Math.min(ny - 1, gy + 1); cy++) {
+        for (let cx = Math.max(0, gx - 1); cx <= Math.min(nx - 1, gx + 1); cx++) {
+          for (const p of cells[cy * nx + cx]) {
+            const dLat = Math.abs(p.lat - lat), dLon = Math.abs(p.lon - lon);
+            if (dLat > maxDegLat || dLon > maxDegLon) continue;
+            const dx = dLon * kmPerDegLon, dy = dLat * kmPerDegLat;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < minD) minD = d;
+            if (d < 0.05) { wSum = 1; vSum = p.value; hit = true; break search; }
+            if (d <= maxDistKm) {
+              const w = 1 / Math.pow(d, power);
+              wSum += w; vSum += w * p.value;
+            }
+          }
         }
       }
       const idx = (py * width + px) * 4;
@@ -340,9 +366,27 @@ function clearMapLayers() {
   if (mapLegendControl) { leafletMap.removeControl(mapLegendControl); mapLegendControl = null; }
   lastHeatmapPoints = null;
   lastHeatmapDiverging = null;
+  lastHeatmapOpts = null;
+  if (typeof tyMarkers !== "undefined") tyMarkers.clear();
 }
 
 function rgbStr(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+// legends collapse to their title on tap (default collapsed on phones so the map stays visible);
+// the choice is remembered across re-renders
+let legendCollapsed = typeof window !== "undefined" && window.innerWidth < 640;
+function wireLegendToggle(div) {
+  div.classList.toggle("collapsed", legendCollapsed);
+  const title = div.querySelector(".map-legend-title");
+  title.setAttribute("role", "button");
+  title.setAttribute("title", "點選展開／收合圖例");
+  L.DomEvent.disableClickPropagation(div);
+  L.DomEvent.disableScrollPropagation(div);
+  title.addEventListener("click", () => {
+    legendCollapsed = !legendCollapsed;
+    div.classList.toggle("collapsed", legendCollapsed);
+  });
+}
 
 function addRainLegend(unitLabel) {
   mapLegendControl = L.control({ position: "bottomright" });
@@ -353,7 +397,8 @@ function addRainLegend(unitLabel) {
       const label = bin.max === Infinity ? `≥${bin.min}` : `${bin.min}–${bin.max}`;
       rows += `<div class="map-legend-row"><span class="map-legend-swatch" style="background:${rgbStr(bin.color)}"></span>${label}</div>`;
     });
-    div.innerHTML = `<div class="map-legend-title">${unitLabel}</div>${rows}`;
+    div.innerHTML = `<div class="map-legend-title">${unitLabel}</div><div class="map-legend-body">${rows}</div>`;
+    wireLegendToggle(div);
     return div;
   };
   mapLegendControl.addTo(leafletMap);
@@ -369,7 +414,8 @@ function addDivergingRainLegend(title, maxAbs) {
       const v = t * maxAbs;
       rows += `<div class="map-legend-row"><span class="map-legend-swatch" style="background:${rgbStr(divergingColorArr(v, maxAbs))}"></span>${v > 0 ? "+" : ""}${fmt(v, 1)}</div>`;
     });
-    div.innerHTML = `<div class="map-legend-title">${title}</div>${rows}`;
+    div.innerHTML = `<div class="map-legend-title">${title}</div><div class="map-legend-body">${rows}</div>`;
+    wireLegendToggle(div);
     return div;
   };
   mapLegendControl.addTo(leafletMap);
@@ -385,7 +431,8 @@ function addValueLegend(title, colorFn, minV, maxV, unit) {
       const v = minV + (maxV - minV) * (i / steps);
       rows += `<div class="map-legend-row"><span class="map-legend-swatch" style="background:${colorFn(v)}"></span>${fmt(v, 1)} ${unit}</div>`;
     }
-    div.innerHTML = `<div class="map-legend-title">${title}</div>${rows}`;
+    div.innerHTML = `<div class="map-legend-title">${title}</div><div class="map-legend-body">${rows}</div>`;
+    wireLegendToggle(div);
     return div;
   };
   mapLegendControl.addTo(leafletMap);
@@ -551,6 +598,11 @@ function aggregateForMap(series, dates) {
 }
 
 function exportMapCsv() {
+  if (state.mapmode === "typhoon") {
+    if (!tyLastExport) { alert("請先產生颱風雨量圖"); return; }
+    downloadCsv(tyLastExport.filename, [tyLastExport.header, ...tyLastExport.rows]);
+    return;
+  }
   if (!lastMapRows || !lastMapRows.length) { alert("請先產生地圖"); return; }
   const isDiff = state.mapmode === "diff";
   const unit = UNIT[state.dataType];
@@ -726,8 +778,8 @@ function applyCountiesOpacity(v) {
 }
 function applyStationOpacity(v) {
   STATION_OPACITY = v;
-  if (mapMarkersLayer) mapMarkersLayer.eachLayer(m => { if (m.setStyle) m.setStyle({ fillOpacity: v }); });
-  [rainStationsLayer, levelStationsLayer, dischargeStationsLayer].forEach(layer => {
+  if (mapMarkersLayer) mapMarkersLayer.eachLayer(m => { if (m.setStyle) m.setStyle({ fillOpacity: v, opacity: v }); });
+  [rainStationsLayer, levelStationsLayer, dischargeStationsLayer, tyStationRefLayer].forEach(layer => {
     if (layer) layer.eachLayer(m => { if (m.setOpacity) m.setOpacity(v); });
   });
   pctLabel("opStationsVal", v);

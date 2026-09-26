@@ -102,6 +102,7 @@ function renderStationOptions() {
   if (list.length === 0) {
     state.stationId = null;
     document.getElementById("stationInfo").innerHTML = "";
+    renderThresholdEditor();
     return;
   }
   const stillThere = list.some(s => s.id === prev);
@@ -128,6 +129,8 @@ function renderStationInfo() {
     parts.push(flags.join(" "));
   }
   el.innerHTML = parts.join("");
+  renderThresholdEditor();
+  if (state.mode === "eval") evPopulateRain();
 }
 
 /* ---------- aggregation ---------- */
@@ -234,6 +237,7 @@ function runQuery() {
   resultEl.innerHTML = `
     <div class="legend-row"><span><span class="swatch" style="background:${color}"></span>${station.name_zh} — ${TYPE_LABEL[state.dataType]}（${UNIT[state.dataType]}）</span></div>
     ${statsTilesHtml(stats)}
+    ${exceedTilesHtml(series, dates)}
     <div class="chart-wrap"><canvas id="queryCanvas"></canvas></div>
     <details class="table-details"><summary>顯示每日資料表格（${dates.length} 筆）</summary>
       <div class="table-scroll"><table class="data-table">
@@ -260,7 +264,8 @@ function runQuery() {
         tension: 0.15,
       }]
     },
-    options: chartOptions(dates.length, state.dataType === "rainfall")
+    options: applyThresholdRange(chartOptions(dates.length, state.dataType === "rainfall")),
+    plugins: [refLinesPlugin({ hLines: thresholdHLines() })],
   });
 }
 
@@ -353,6 +358,7 @@ function runCompare() {
         </div>
       </div>
     </div>
+    ${compareExceedHtml(series, datesA, datesB)}
     <div class="legend-row">
       <span><span class="swatch" style="background:${colorA}"></span>期間 A（依天數序，第 1 天起）</span>
       <span><span class="swatch" style="background:${colorB}"></span>期間 B（依天數序，第 1 天起）</span>
@@ -382,8 +388,26 @@ function runCompare() {
         { label: "期間 B", data: dataB, borderColor: colorB, backgroundColor: "transparent", pointRadius: n > 60 ? 0 : 2, borderWidth: 2, spanGaps: false, tension: 0.15 },
       ]
     },
-    options: chartOptions(n, state.dataType === "rainfall")
+    options: applyThresholdRange(chartOptions(n, state.dataType === "rainfall")),
+    plugins: [refLinesPlugin({ hLines: thresholdHLines() })],
   });
+}
+
+function compareExceedHtml(series, datesA, datesB) {
+  const thr = currentThresholds();
+  if (!thr.length) return "";
+  const unit = UNIT[state.dataType];
+  const rows = thr.map(t => {
+    const a = exceedStats(series, datesA, t.value), b = exceedStats(series, datesB, t.value);
+    const d = a.count - b.count;
+    return `<tr><td><span class="thr-dot" style="background:${t.color}"></span>≥「${escapeHtml(t.label)}」${thrFmt(t.value)} ${unit}</td>
+      <td class="num">${a.count} 天（${pct(a.ratio)}）</td><td class="num">${b.count} 天（${pct(b.ratio)}）</td>
+      <td class="num ${d > 0 ? "delta-up" : d < 0 ? "delta-down" : ""}">${d > 0 ? "+" : ""}${d} 天</td>
+      <td class="num">${a.maxRun}／${b.maxRun} 天</td></tr>`;
+  }).join("");
+  return `<div class="table-scroll" style="margin:4px 0 12px;"><table class="data-table ev-table">
+    <thead><tr><th>超過警戒值</th><th class="num">期間 A</th><th class="num">期間 B</th><th class="num">A − B</th><th class="num">最長連續（A／B）</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 function renderCompareRows(datesA, datesB, series) {
@@ -415,8 +439,10 @@ function downloadCsv(filename, rows) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a); // some browsers ignore the filename on a detached link
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function exportCsv() {
@@ -469,6 +495,9 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("queryPanel").style.display = state.mode === "query" ? "" : "none";
     document.getElementById("comparePanel").style.display = state.mode === "compare" ? "" : "none";
     document.getElementById("mapPanel").style.display = state.mode === "map" ? "" : "none";
+    document.getElementById("evalPanel").style.display = state.mode === "eval" ? "" : "none";
+    if (state.mode !== "map") tyLeaveMode();
+    if (state.mode === "eval") evOnEnter();
     if (state.mode === "map") {
       const map = ensureMap();
       renderMapGranInputs();
@@ -478,8 +507,15 @@ document.addEventListener("DOMContentLoaded", () => {
   setSeg("granSeg", "gran", () => { renderGranInputs(); });
   setSeg("mapGranSeg", "mapgran", () => { renderMapGranInputs(); });
   setSeg("mapModeSeg", "mapmode", () => {
+    const ty = state.mapmode === "typhoon";
     document.getElementById("mapSingleInputs").style.display = state.mapmode === "single" ? "" : "none";
     document.getElementById("mapDiffInputs").style.display = state.mapmode === "diff" ? "" : "none";
+    document.getElementById("mapTyphoonInputs").style.display = ty ? "" : "none";
+    document.getElementById("tyPanels").style.display = ty ? "" : "none";
+    document.getElementById("mapNote").style.display = ty ? "none" : "";
+    clearMapLayers();
+    document.getElementById("mapStatus").textContent = "";
+    if (ty) tyEnterMode(); else tyLeaveMode();
   });
 
   document.addEventListener("change", e => {
@@ -506,7 +542,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("compareBtn").addEventListener("click", runCompare);
   document.getElementById("exportCompareCsvBtn").addEventListener("click", exportCompareCsv);
   document.getElementById("mapQueryBtn").addEventListener("click", () => {
-    if (state.mapmode === "diff") runMapDiffQuery(); else runMapQuery();
+    if (state.mapmode === "diff") runMapDiffQuery();
+    else if (state.mapmode === "typhoon") runTyphoonMap();
+    else runMapQuery();
   });
   document.getElementById("exportMapCsvBtn").addEventListener("click", exportMapCsv);
 

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>雨量與河川水位流量查詢</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -13,7 +14,7 @@
   <header class="top">
     <div>
       <h1>雨量與河川水位流量查詢系統</h1>
-      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（2020～2024年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。部分測站僅其中一至數年有完整資料，詳見測站資訊列。</p>
+      <p>資料來源：經濟部水利署《臺灣水文年報》第一部分雨量、第二部分河川水位及流量（2020～2024年，共 <span id="rainCount">-</span> 個雨量站、<span id="riverCount">-</span> 個水位/流量站）。部分測站僅其中一至數年有完整資料，詳見測站資訊列。地圖模式另收錄中央氣象署颱風資料庫 1958–2026 年 350 場颱風、1,067 個雨量站的逐時雨量與事件統計。</p>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button">切換深色模式</button>
   </header>
@@ -45,6 +46,7 @@
       </label>
     </div>
     <div class="station-info" id="stationInfo"></div>
+    <details class="color-scale-editor thr-editor" id="thrEditor"></details>
   </section>
 
   <section class="panel">
@@ -54,6 +56,7 @@
         <button data-mode="query" class="active">單一查詢</button>
         <button data-mode="compare">期間比較（加減）</button>
         <button data-mode="map">空間分佈地圖</button>
+        <button data-mode="eval">治理前後評估</button>
       </div>
     </div>
 
@@ -100,6 +103,7 @@
         <div class="seg" id="mapModeSeg">
           <button data-mapmode="single" class="active">單期查詢</button>
           <button data-mapmode="diff">期間相減（A－B）</button>
+          <button data-mapmode="typhoon">颱風事件雨量（1958–2026）</button>
         </div>
       </div>
 
@@ -126,6 +130,41 @@
           <label class="field">颱風快選 B<select class="typhoon-pick" data-start="mBStart" data-end="mBEnd"><option value="">不套用</option></select></label>
         </div>
         <p class="empty-note" style="padding:0;text-align:left;margin:-2px 0 8px;">地圖將呈現各測站「期間 A 減期間 B」之差異（雨量：總雨量差；水位／流量：平均值差）。</p>
+      </div>
+
+      <div id="mapTyphoonInputs" style="display:none;">
+        <div class="row">
+          <label class="field">年份<select id="tyYear"></select></label>
+          <label class="field">搜尋颱風<input type="text" id="tySearch" placeholder="例如：莫拉克、GAEMI"></label>
+          <label class="field ty-grow">颱風（A）<select id="tySelect"></select></label>
+        </div>
+        <div class="row">
+          <label class="field">統計量<select id="tyStat"></select></label>
+          <label class="field">對照颱風 B（選填，地圖改為 A－B）<select id="tyCompare"></select></label>
+          <label class="field">內插半徑<select id="tyRadius">
+            <option value="auto">自動（依測站密度）</option>
+            <option value="15">15 km</option><option value="22">22 km</option><option value="30">30 km</option>
+            <option value="40">40 km</option><option value="60">60 km</option>
+          </select></label>
+          <label class="field">色階<select id="tyScale">
+            <option value="auto">自動（超過 350 mm 改用延伸級距）</option>
+            <option value="std">氣象署標準級距（0.5–300+ mm）</option>
+            <option value="ext">延伸級距（續分至 2,000+ mm）</option>
+          </select></label>
+        </div>
+        <div class="row" id="tyHourlyControls" style="display:none;">
+          <label class="field">累積時數<select id="tyWinLen"></select></label>
+          <div class="ty-timeline">
+            <button class="ghost" id="tyPlayBtn" type="button">▶ 播放</button>
+            <input type="range" id="tyEnd" min="0" max="0" value="0" aria-label="時段結束時間">
+            <span class="badge" id="tyEndLabel"></span>
+          </div>
+        </div>
+        <label class="check-row"><input type="checkbox" id="tyZeroFill" checked>
+          將「該年份前後仍有觀測紀錄、但本場颱風未列資料」的測站視為 0 mm 納入內插（資料庫只收錄 ≥0.1 mm 的時雨量，未勾選時雨區邊緣會被高估）</label>
+        <p class="empty-note" style="padding:0;text-align:left;margin:2px 0 8px;">
+          此模式使用中央氣象署颱風資料庫測站（含自動雨量站），不受上方「資料類型／測站」選擇影響。內插方式與水利署雨量站相同（反距離加權 IDW、中央氣象署配色、可用上方色階設定自訂）；澎湖、金門、馬祖、蘭嶼等外島測站只標示數值不參與內插。點選地圖上的測站或下方排名表，可查看該站逐時雨量與歷年颱風排名。
+        </p>
       </div>
 
       <div class="row">
@@ -182,11 +221,55 @@
       </details>
 
       <div id="mapCanvas"></div>
+      <div id="tyPanels" style="display:none;">
+        <div id="tySummary"></div>
+        <div id="tyDetail"></div>
+      </div>
+    </div>
+
+    <!-- BEFORE/AFTER EVALUATION MODE -->
+    <div id="evalPanel" style="display:none;">
+      <p class="empty-note" style="padding:0;text-align:left;margin:0 0 10px;">
+        以上方所選測站，比較工程「開工前」與「完工後」同樣長度期間的水位／流量／雨量，並統計超過警戒值的天數（警戒值請在上方「警戒值設定」填入）。可搭配附近雨量站判斷兩段期間降雨是否相當，避免把「雨變少」誤判為「工程有效」。也可從下方「治理工程點位」清單直接帶入工程與最近的水位站。
+      </p>
+      <p class="ev-project-note" id="evProjectNote"></p>
+      <div class="row">
+        <label class="field">開工日（選填，施工期不列入比較）<input type="date" id="evStart" min="2020-01-01" max="2024-12-31"></label>
+        <label class="field">完工日<input type="date" id="evEnd" min="2020-01-01" max="2024-12-31"></label>
+        <label class="field">比較期間<select id="evWindow">
+          <option value="30">前後各 30 天</option>
+          <option value="90">前後各 90 天</option>
+          <option value="180">前後各 180 天</option>
+          <option value="365" selected>前後各 1 年</option>
+          <option value="730">前後各 2 年</option>
+          <option value="all">前後全部可用資料</option>
+        </select></label>
+        <label class="field" id="evRainWrap">參考雨量站（判斷兩期降雨差異）<select id="evRain"></select></label>
+      </div>
+      <div class="row">
+        <button class="primary" id="evBtn" type="button">評估治理前後</button>
+        <button class="ghost" id="evCsvBtn" type="button">匯出 CSV</button>
+      </div>
+      <div id="evResult"></div>
     </div>
   </section>
 
+  <section class="panel" id="prjPanel">
+    <h2>3. 治理工程點位（匯入）</h2>
+    <div class="row">
+      <label class="file-btn">選擇檔案（CSV／GeoJSON）<input type="file" id="prjFile" accept=".csv,.txt,.geojson,.json"></label>
+      <button class="ghost" id="prjTemplateBtn" type="button">下載 CSV 範本</button>
+      <button class="ghost" id="prjClearBtn" type="button" style="display:none;">清除全部</button>
+      <span class="badge" id="prjStatus"></span>
+    </div>
+    <p class="empty-note" style="padding:0;text-align:left;margin:0 0 8px;">
+      CSV 需有「名稱、經度、緯度」欄位（也可用 TWD97 二度分帶的 X、Y 座標，會自動轉換），可另加「開工日、完工日、工程類型、經費」等欄位，日期可用西元或民國年；Excel 檔請「另存新檔 → CSV」（UTF-8 或 Big5 皆可）。匯入後會在地圖顯示「治理工程點位」圖層，並自動找出最近的水位站，可一鍵做治理前後評估。資料只存在這台電腦的瀏覽器，不會上傳。
+    </p>
+    <div id="prjList"></div>
+  </section>
+
   <p class="footer-note">
-    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
+    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。颱風事件雨量資料來源為中央氣象署颱風資料庫（rdc28.cwa.gov.tw/TDB）雨量統計，時間為該小時結束時間；資料庫只列時雨量 ≥0.1 mm 的小時，缺漏小時視為 0；早年（約 1990 年代以前）僅有少數人工測站，雨量圖為粗略推估；資料庫現行測站清單不含已撤站的舊站。「警戒值設定」與「治理工程點位」只儲存在這台電腦的瀏覽器（清除瀏覽器資料會一併清除），不會上傳；官方警戒水位請依各河川分署公告自行填入。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
   </p>
 </div>
 
@@ -200,5 +283,7 @@
 <script src="typhoons.js"></script>
 <script src="app.js"></script>
 <script src="map.js"></script>
+<script src="typhoon.js"></script>
+<script src="audit.js"></script>
 </body>
 </html>

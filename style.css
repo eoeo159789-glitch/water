@@ -15,6 +15,8 @@
   --series-b:       #e34948; /* 期間 B - diverging red */
   --good:           #006300;
   --bad:            #d03b3b;
+  --warn-1:         #d03b3b; /* 警戒值 1 */
+  --warn-2:         #c98500; /* 警戒值 2 */
   --radius:         10px;
 }
 @media (prefers-color-scheme: dark) {
@@ -35,6 +37,8 @@
     --series-b:       #e66767;
     --good:           #0ca30c;
     --bad:            #e66767;
+    --warn-1:         #ef6f6f;
+    --warn-2:         #e8ac2c;
   }
 }
 :root[data-theme="dark"] {
@@ -54,6 +58,8 @@
   --series-b:       #e66767;
   --good:           #0ca30c;
   --bad:            #e66767;
+  --warn-1:         #ef6f6f;
+  --warn-2:         #e8ac2c;
 }
 
 * { box-sizing: border-box; }
@@ -385,6 +391,58 @@ button.ghost {
   background: var(--page);
 }
 
+/* ---------- typhoon-event mode ---------- */
+.seg { max-width: 100%; flex-wrap: wrap; }
+.ty-grow { flex: 1 1 320px; }
+.ty-grow select { width: 100%; }
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 2px 0 6px;
+}
+.check-row input { margin-top: 3px; accent-color: var(--series-1); }
+.ty-timeline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+}
+.ty-timeline input[type="range"] { flex: 1 1 180px; min-width: 140px; accent-color: var(--series-1); padding: 0; }
+.ty-timeline .badge { font-variant-numeric: tabular-nums; }
+#tyPanels { margin-top: 10px; }
+.ty-h3 {
+  font-size: 0.88rem;
+  margin: 14px 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.ty-hint { font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
+.stat-tile .v.ty-v { font-size: 0.98rem; }
+table.data-table.ty-table th, table.data-table.ty-table td { text-align: left; }
+table.data-table.ty-table th.num, table.data-table.ty-table td.num { text-align: right; }
+.ty-table tbody tr { cursor: pointer; }
+.map-legend { max-height: 420px; overflow-y: auto; }
+@media (max-width: 640px) { .map-legend { max-height: 280px; } }
+.ty-table tbody tr:hover td { background: var(--surface-2); }
+.ty-table tr.ty-hl td { background: color-mix(in srgb, var(--series-1) 14%, transparent); font-weight: 600; }
+.ty-detail-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--gridline); margin-top: 14px; }
+.ty-detail-head .ty-h3 { margin: 12px 0 4px; }
+.chart-wrap.ty-chart { height: 300px; }
+.station-icon.cwa {
+  width: 8px; height: 8px;
+  background: #8e4fc9;
+  border: 1px solid #4b2170;
+  border-radius: 50%;
+  margin: 1px;
+}
+
 .legend-row {
   display: flex; gap: 16px; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px; flex-wrap: wrap;
 }
@@ -435,3 +493,56 @@ details.table-details summary {
   color: var(--text-secondary);
   border: 1px solid var(--border);
 }
+
+/* collapsible map legend */
+.map-legend-title { cursor: pointer; user-select: none; }
+.map-legend-title::after { content: " ▾"; color: var(--text-muted); font-weight: 400; }
+.map-legend.collapsed .map-legend-title { margin-bottom: 0; }
+.map-legend.collapsed .map-legend-title::after { content: " ▸"; }
+.map-legend.collapsed .map-legend-body { display: none; }
+
+/* ---------- warning thresholds ---------- */
+.thr-editor { margin-top: 10px; }
+.thr-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.thr-row .thr-label { width: 110px; min-width: 0; }
+.thr-row .thr-value { width: 110px; }
+.thr-swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
+.thr-note { padding: 4px 0 2px !important; text-align: left !important; font-size: 0.74rem !important; line-height: 1.5; }
+.stat-tile.thr-tile { border-left: 3px solid var(--warn-1); }
+.thr-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.thr-dash { width: 18px; height: 0; border-top: 2px dashed; display: inline-block; }
+
+/* ---------- before/after evaluation ---------- */
+.ev-project-note:empty { display: none; }
+.ev-project-note { font-size: 0.8rem; color: var(--text-secondary); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; }
+.ev-findings { background: var(--surface-2); border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 0.83rem; line-height: 1.65; color: var(--text-primary); }
+.ev-findings p { margin: 4px 0; }
+table.data-table.ev-table th, table.data-table.ev-table td { text-align: left; }
+table.data-table.ev-table th.num, table.data-table.ev-table td.num { text-align: right; }
+.ev-table .sub { font-size: 0.68rem; color: var(--text-muted); }
+.ev-table .swatch { vertical-align: 0; margin-right: 4px; }
+
+/* ---------- project import ---------- */
+.file-btn {
+  position: relative; display: inline-flex; align-items: center;
+  background: var(--series-1); color: #fff; border-radius: 8px; padding: 8px 14px;
+  font-size: 0.82rem; font-weight: 600; cursor: pointer;
+}
+.file-btn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.file-btn:focus-within { outline: 2px solid var(--series-1); outline-offset: 2px; }
+table.data-table.prj-table th, table.data-table.prj-table td { text-align: left; }
+.prj-actions { white-space: nowrap; }
+.prj-actions button { padding: 4px 8px; font-size: 0.74rem; margin-right: 4px; }
+.project-icon span {
+  display: block; width: 12px; height: 12px; margin: 1px;
+  background: #e07b1f; border: 2px solid #fff; transform: rotate(45deg);
+  box-shadow: 0 0 0 1px #7a3d00, 0 1px 3px rgba(0,0,0,0.4);
+}
+.prj-popup { font-size: 0.78rem; line-height: 1.5; }
+.prj-popup table { border-collapse: collapse; margin: 6px 0; }
+.prj-popup td { padding: 1px 6px 1px 0; vertical-align: top; }
+.prj-popup td:first-child { color: #777; white-space: nowrap; }
+.prj-popup button { margin-top: 4px; padding: 4px 10px; font-size: 0.75rem; color: #333; border-color: #bbb; }
+table.data-table.prj-table { min-width: 680px; }
+table.data-table.prj-table td:first-child { min-width: 160px; }
+.prj-table .badge { white-space: nowrap; }

@@ -1,6 +1,6 @@
 /* ---------- audit tools: warning thresholds, before/after evaluation, project-point import ---------- */
 
-const DATA_MIN = "2020-01-01", DATA_MAX = "2024-12-31";
+const DATA_MIN = DATA_FIRST_DATE, DATA_MAX = DATA_LAST_DATE;
 
 function safeGet(key, fallback) {
   try { const v = JSON.parse(localStorage.getItem(key)); return v === null || v === undefined ? fallback : v; } catch (e) { return fallback; }
@@ -24,6 +24,16 @@ function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":
    ===================================================================== */
 const THR_STORE = "hy_thresholds_v1";
 let THRESHOLDS = safeGet(THR_STORE, {});
+// station ids renamed when the 2001-2019 yearbooks were merged: carry saved thresholds over
+(() => {
+  let moved = false;
+  Object.keys(THRESHOLDS).forEach(k => {
+    const [type, id] = k.split("|");
+    const nid = HY_ID_ALIAS[id];
+    if (nid && !THRESHOLDS[`${type}|${nid}`]) { THRESHOLDS[`${type}|${nid}`] = THRESHOLDS[k]; delete THRESHOLDS[k]; moved = true; }
+  });
+  if (moved) safeSet(THR_STORE, THRESHOLDS);
+})();
 const THR_COLOR_VARS = ["--warn-1", "--warn-2"];
 
 function thrKey() { return `${state.dataType}|${state.stationId}`; }
@@ -290,7 +300,13 @@ function changeStr(b, a, digits, unit) {
   return `${d >= 0 ? "+" : ""}${fmt(d, digits)}${unit ? " " + unit : ""}${rel}`;
 }
 
-function runEval() {
+// every year from the start of "before" to the end of "after" (the chart also shows the construction period)
+function evYearSpan(a, b) {
+  const out = [];
+  for (let y = +a.slice(0, 4); y <= +b.slice(0, 4); y++) out.push(y);
+  return out;
+}
+async function runEval() {
   const resultEl = document.getElementById("evResult");
   const station = getStationById(state.stationId);
   if (!station) { resultEl.innerHTML = `<p class="empty-note">請先於上方選擇測站</p>`; return; }
@@ -302,6 +318,9 @@ function runEval() {
   const digits = isRain ? 1 : 2;
   const dB = dateRangeArray(P.before.start, P.before.end);
   const dA = dateRangeArray(P.after.start, P.after.end);
+  const needRain = !isRain && document.getElementById("evRain").value;
+  try { await hyEnsureWithNote(resultEl, needRain ? [state.dataType, "rainfall"] : state.dataType, evYearSpan(P.before.start, P.after.end)); }
+  catch (e) { resultEl.innerHTML = `<p class="empty-note">${e.message}</p>`; return; }
   const sB = periodStats(series, dB), sA = periodStats(series, dA);
   const thr = currentThresholds();
   const exB = thr.map(t => exceedStats(series, dB, t.value));
@@ -580,7 +599,7 @@ async function importProjectFile(file) {
 function nearestLevelStation(p) {
   let best = null;
   RIVER.forEach(s => {
-    if (s.lat === undefined || !Object.keys(s.level || {}).length) return;
+    if (s.lat === undefined || !s.ly.length) return;
     const d = haversineKm(p.lat, p.lon, s.lat, s.lon);
     if (!best || d < best.d) best = { s, d };
   });

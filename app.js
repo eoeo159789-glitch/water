@@ -47,7 +47,7 @@ function allStations() {
     return RAINFALL.map(s => ({ ...s, _series: "daily" }));
   }
   return RIVER
-    .filter(s => (state.dataType === "level" ? Object.keys(s.level).length : Object.keys(s.discharge).length) > 0)
+    .filter(s => (state.dataType === "level" ? s.ly.length : s.dy.length) > 0)
     .map(s => ({ ...s, _series: state.dataType }));
 }
 
@@ -57,7 +57,7 @@ function filteredStations() {
   const q = document.getElementById("stationSearch").value.trim().toLowerCase();
   if (q) {
     list = list.filter(s => {
-      const hay = [s.name_zh, s.name_en, s.code, s.basin_zh, s.tributary_zh].filter(Boolean).join(" ").toLowerCase();
+      const hay = [s.name_zh, s.name_en, s.code, s.basin_zh, s.tributary_zh, ...(s.alias || []), ...(s.codes || [])].filter(Boolean).join(" ").toLowerCase();
       return hay.includes(q);
     });
   }
@@ -70,12 +70,19 @@ function filteredStations() {
 }
 
 function getStationById(id) {
-  if (state.dataType === "rainfall") return RAINFALL.find(s => s.id === id);
-  return RIVER.find(s => s.id === id);
+  const s = hyStation(id);
+  if (!s) return undefined;
+  return (state.dataType === "rainfall") === RAINFALL.includes(s) ? s : undefined;
 }
 function getSeries(station) {
   if (state.dataType === "rainfall") return station.daily;
   return station[state.dataType];
+}
+
+// years with data for the current data type
+function stationYears(s) {
+  if (state.dataType === "rainfall") return s.years || [];
+  return (state.dataType === "level" ? s.ly : s.dy) || [];
 }
 
 /* ---------- station list UI ---------- */
@@ -95,7 +102,10 @@ function renderStationOptions() {
     }
     const opt = document.createElement("option");
     opt.value = s.id;
-    opt.textContent = `${s.name_zh || "(未知)"}（${s.code || "無代碼"}）`;
+    const yrs = stationYears(s);
+    const last = yrs.length ? Math.max(...yrs.map(Number)) : null;
+    // stations without data in the latest yearbook year: show their data years
+    opt.textContent = `${s.name_zh || "(未知)"}（${s.code || "無代碼"}）${last !== null && last < DATA_LAST_YEAR ? `〔${hyYearRanges(yrs)}〕` : ""}`;
     (group || sel).appendChild(opt);
   });
   document.getElementById("stationCountLabel").textContent = list.length;
@@ -106,7 +116,8 @@ function renderStationOptions() {
     return;
   }
   const stillThere = list.some(s => s.id === prev);
-  state.stationId = stillThere ? prev : list[0].id;
+  const current = list.find(s => stationYears(s).map(Number).includes(DATA_LAST_YEAR)) || list[0];
+  state.stationId = stillThere ? prev : current.id;
   sel.value = state.stationId;
   renderStationInfo();
 }
@@ -121,13 +132,14 @@ function renderStationInfo() {
   parts.push(`<span>區域：${REGION_LABEL[s.region] || "未知"}</span>`);
   if (s.basin_zh) parts.push(`<span>流域：${s.basin_zh}</span>`);
   if (s.tributary_zh && s.tributary_zh !== s.basin_zh) parts.push(`<span>河流：${s.tributary_zh}</span>`);
-  if (s.years) parts.push(`<span>資料年份：${s.years.map(y => `<span class="badge">${y}</span>`).join(" ")}</span>`);
-  if (state.dataType !== "rainfall") {
-    const flags = [];
-    if (Object.keys(s.level).length) flags.push(`<span class="badge">有水位資料</span>`);
-    if (Object.keys(s.discharge).length) flags.push(`<span class="badge">有流量資料</span>`);
-    parts.push(flags.join(" "));
+  if (state.dataType === "rainfall") {
+    if (s.years) parts.push(`<span>資料年份：<span class="badge">${hyYearRanges(s.years)}</span></span>`);
+  } else {
+    if (s.ly.length) parts.push(`<span>水位資料：<span class="badge">${hyYearRanges(s.ly)}</span></span>`);
+    if (s.dy.length) parts.push(`<span>流量資料：<span class="badge">${hyYearRanges(s.dy)}</span></span>`);
   }
+  if (s.alias && s.alias.length) parts.push(`<span>年報中其他站名：${s.alias.join("、")}</span>`);
+  if (s.codes && s.codes.length > 1) parts.push(`<span>歷年代碼：${s.codes.join("、")}</span>`);
   el.innerHTML = parts.join("");
   renderThresholdEditor();
   if (state.mode === "eval") evPopulateRain();
@@ -162,21 +174,21 @@ function renderGranInputs() {
   const el = document.getElementById("granInputs");
   if (state.gran === "day") {
     el.innerHTML = `<label class="field">選擇日期
-      <input type="date" id="qDate" min="2020-01-01" max="2024-12-31" value="2024-01-01">
+      <input type="date" id="qDate" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-01">
     </label>`;
   } else if (state.gran === "month") {
     el.innerHTML = `<label class="field">選擇年份
-      <select id="qYear"><option value="2024">2024</option><option value="2023">2023</option><option value="2022">2022</option><option value="2021">2021</option><option value="2020">2020</option></select>
+      <select id="qYear">${hyYearOptions()}</select>
     </label>
     <label class="field">選擇月份
       <select id="qMonth">${MONTH_NAMES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("")}</select>
     </label>`;
   } else {
     el.innerHTML = `<label class="field">開始日期
-      <input type="date" id="qStart" min="2020-01-01" max="2024-12-31" value="2024-01-01">
+      <input type="date" id="qStart" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-01">
     </label>
     <label class="field">結束日期
-      <input type="date" id="qEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31">
+      <input type="date" id="qEnd" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-31">
     </label>
     <label class="field">颱風快選<select class="typhoon-pick" data-start="qStart" data-end="qEnd"><option value="">不套用</option></select></label>`;
   }
@@ -221,13 +233,18 @@ function statsTilesHtml(stats) {
 }
 
 /* ---------- query mode ---------- */
-function runQuery() {
+let queryRunSeq = 0;
+async function runQuery() {
   const station = getStationById(state.stationId);
   const resultEl = document.getElementById("queryResult");
   if (!station) { resultEl.innerHTML = `<p class="empty-note">請先選擇測站</p>`; return; }
   const series = getSeries(station);
   const dates = currentQueryDates();
   if (dates.length === 0) { resultEl.innerHTML = `<p class="empty-note">請輸入有效的日期範圍</p>`; return; }
+  const seq = ++queryRunSeq;
+  try { await hyEnsureWithNote(resultEl, state.dataType, hyYearsOfDates(dates)); }
+  catch (e) { resultEl.innerHTML = `<p class="empty-note">${e.message}</p>`; return; }
+  if (seq !== queryRunSeq) return;
   const stats = aggregate(series, dates);
   lastQueryRows = dates.map(d => [d, series[d] !== undefined && series[d] !== null ? series[d] : ""]);
 
@@ -316,7 +333,7 @@ function chartOptions(n, beginAtZero) {
 }
 
 /* ---------- compare mode ---------- */
-function runCompare() {
+async function runCompare() {
   const station = getStationById(state.stationId);
   const resultEl = document.getElementById("compareResult");
   if (!station) { resultEl.innerHTML = `<p class="empty-note">請先選擇測站</p>`; return; }
@@ -329,6 +346,8 @@ function runCompare() {
   }
   const datesA = dateRangeArray(aS, aE);
   const datesB = dateRangeArray(bS, bE);
+  try { await hyEnsureWithNote(resultEl, state.dataType, hyYearsOfDates(datesA, datesB)); }
+  catch (e) { resultEl.innerHTML = `<p class="empty-note">${e.message}</p>`; return; }
   const statsA = aggregate(series, datesA);
   const statsB = aggregate(series, datesB);
 
@@ -485,15 +504,21 @@ function populateTyphoonSelects() {
   document.querySelectorAll("select.typhoon-pick").forEach(sel => {
     if (sel.dataset.populated) return;
     sel.dataset.populated = "1";
-    const g1 = document.createElement("optgroup");
-    g1.label = "2020–2024（水利署年報資料期間）";
-    TYPHOON_PERIODS.forEach((t, i) => {
-      const opt = document.createElement("option");
-      opt.value = i;
-      opt.textContent = `${t.start.slice(0, 4)} ${t.name_zh}(${t.name_en}) ${t.start}~${t.end}`;
-      g1.appendChild(opt);
+    // yearbook period (2001-2024): one group per year, newest first
+    const byYear = {};
+    TYPHOON_PERIODS.forEach((t, i) => { (byYear[t.start.slice(0, 4)] = byYear[t.start.slice(0, 4)] || []).push(i); });
+    Object.keys(byYear).sort().reverse().forEach(y => {
+      const g = document.createElement("optgroup");
+      g.label = `${y}（水利署年報）`;
+      byYear[y].forEach(i => {
+        const t = TYPHOON_PERIODS[i];
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = `${t.name_zh}(${t.name_en}) ${t.start}~${t.end}`;
+        g.appendChild(opt);
+      });
+      sel.appendChild(g);
     });
-    sel.appendChild(g1);
     // later (and earlier) typhoons have no yearbook data: on the map they open the typhoon-event mode (CWA stations)
     if (typeof TYPHOON_PERIODS_CWA_ONLY === "undefined") return;
     const onMap = sel.dataset.start === "mStart";
@@ -510,7 +535,7 @@ function populateTyphoonSelects() {
     if (onMap) {
       const g3 = document.createElement("optgroup");
       g3.label = "更早年份";
-      g3.innerHTML = `<option value="cwa:">1958–2019 颱風 → 開啟「颱風事件雨量」模式選擇</option>`;
+      g3.innerHTML = `<option value="cwa:">1958–2000 颱風 → 開啟「颱風事件雨量」模式選擇</option>`;
       sel.appendChild(g3);
     }
   });
@@ -530,6 +555,7 @@ function setSeg(segId, key, onChange) {
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("rainCount").textContent = RAINFALL.length;
+  document.querySelectorAll(".data-years").forEach(el => { el.textContent = `${DATA_FIRST_YEAR}～${DATA_LAST_YEAR}`; });
   document.getElementById("riverCount").textContent = RIVER.length;
 
   setSeg("dataTypeSeg", "type", () => { renderStationOptions(); wraUpdatePlayUi(); });

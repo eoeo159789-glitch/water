@@ -153,8 +153,8 @@ function ensureMap() {
   // -- static station-location reference layers (independent of any query; always the
   // full 雨量站/水位站/流量站 lists with coordinates) --
   rainStationsLayer = buildStationRefLayer(RAINFALL, "rain", s => true);
-  levelStationsLayer = buildStationRefLayer(RIVER, "level", s => s.level && Object.keys(s.level).length > 0);
-  dischargeStationsLayer = buildStationRefLayer(RIVER, "discharge", s => s.discharge && Object.keys(s.discharge).length > 0);
+  levelStationsLayer = buildStationRefLayer(RIVER, "level", s => s.ly.length > 0);
+  dischargeStationsLayer = buildStationRefLayer(RIVER, "discharge", s => s.dy.length > 0);
 
   const baseLayers = {
     "無底圖（離線可用）": blankBaseLayer,
@@ -218,8 +218,9 @@ function buildStationRefLayer(stations, kind, filterFn) {
       iconSize: [12, 12],
       iconAnchor: [6, 6],
     });
+    const yrs = kind === "level" ? s.ly : kind === "discharge" ? s.dy : s.years;
     const m = L.marker([s.lat, s.lon], { icon, opacity: STATION_OPACITY })
-      .bindTooltip(`${meta.label}：${s.name_zh}（${s.code}）`);
+      .bindTooltip(`${meta.label}：${s.name_zh}（${s.code}）<br>資料年份：${hyYearRanges(yrs)}`);
     group.addLayer(m);
   });
   return group;
@@ -474,13 +475,27 @@ function divergingColorStr(v, maxAbs) {
   return rgbStr(divergingColorArr(v, maxAbs));
 }
 
+/* ---------- per-year data files: load what a map needs first ---------- */
+let mapEnsureSeq = 0;
+async function mapEnsure(statusEl, kind, years) {
+  const seq = ++mapEnsureSeq;
+  const k = HY_KIND[kind] || kind;
+  const need = years.filter(y => HY_YEARS[k].includes(y) && !HY_LOADED.has(`${k}_${y}`)).length;
+  if (need) statusEl.textContent = `載入 ${need} 個年度資料檔中…`;
+  try { await hyEnsure(kind, years); }
+  catch (e) { statusEl.textContent = e.message; return false; }
+  if (need) statusEl.textContent = "";
+  return seq === mapEnsureSeq;     // a newer request started meanwhile: let that one draw
+}
+
 /* ---------- single-period map ---------- */
-function runMapQuery() {
+async function runMapQuery() {
   const map = ensureMap();
   clearMapLayers();
   const dates = currentMapDates();
   const statusEl = document.getElementById("mapStatus");
   if (dates.length === 0) { statusEl.textContent = "請輸入有效的日期範圍"; return; }
+  if (!(await mapEnsure(statusEl, state.dataType, hyYearsOfDates(dates)))) return;
 
   if (state.dataType === "rainfall") {
     wraStopPlay(true);
@@ -517,7 +532,7 @@ function runMapQuery() {
 }
 
 /* ---------- period-subtraction (A - B) map ---------- */
-function runMapDiffQuery() {
+async function runMapDiffQuery() {
   const map = ensureMap();
   clearMapLayers();
   const statusEl = document.getElementById("mapStatus");
@@ -529,6 +544,7 @@ function runMapDiffQuery() {
   }
   const datesA = dateRangeArray(aS, aE);
   const datesB = dateRangeArray(bS, bE);
+  if (!(await mapEnsure(statusEl, state.dataType, hyYearsOfDates(datesA, datesB)))) return;
 
   if (state.dataType === "rainfall") {
     const points = [];
@@ -820,6 +836,7 @@ async function wraRenderFrame(light) {
     return;
   }
   const ds = mode === "cum" ? all.slice(0, i + 1) : [all[i]];
+  await hyEnsure("rain", hyYearsOfDates(ds));
   renderWraRainMap(ds, {
     light,
     title: mode === "cum" ? "自起始日累積 (mm)" : "當日雨量 (mm)",
@@ -835,6 +852,10 @@ async function wraTogglePlay() {
   const mode = document.getElementById("wraPlayMode").value;
   const st = wraStep();
   if (st.kind === "hour" || st.kind === "cday") await ensureTyHourly(st.t);
+  else {
+    try { await hyEnsure("rain", hyYearsOfDates(all)); }
+    catch (e) { document.getElementById("mapStatus").textContent = e.message; return; }
+  }
   // one colour scale for the whole animation: any frame past 350 mm switches to the extended bins
   WRA_BINS_OVERRIDE = null;
   if (typeof TY_EXT_BINS !== "undefined") {
@@ -925,17 +946,17 @@ function exportMapCsv() {
 function renderMapGranInputs() {
   const el = document.getElementById("mapGranInputs");
   if (state.mapgran === "day") {
-    el.innerHTML = `<label class="field">選擇日期<input type="date" id="mDate" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>`;
+    el.innerHTML = `<label class="field">選擇日期<input type="date" id="mDate" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-01"></label>`;
   } else if (state.mapgran === "month") {
     el.innerHTML = `<label class="field">選擇年份
-      <select id="mYear"><option value="2024">2024</option><option value="2023">2023</option><option value="2022">2022</option><option value="2021">2021</option><option value="2020">2020</option></select>
+      <select id="mYear">${hyYearOptions()}</select>
     </label>
     <label class="field">選擇月份
       <select id="mMonth">${MONTH_NAMES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("")}</select>
     </label>`;
   } else {
-    el.innerHTML = `<label class="field">開始日期<input type="date" id="mStart" min="2020-01-01" max="2024-12-31" value="2024-01-01"></label>
-    <label class="field">結束日期<input type="date" id="mEnd" min="2020-01-01" max="2024-12-31" value="2024-01-31"></label>
+    el.innerHTML = `<label class="field">開始日期<input type="date" id="mStart" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-01"></label>
+    <label class="field">結束日期<input type="date" id="mEnd" min="${DATA_FIRST_DATE}" max="${DATA_LAST_DATE}" value="2024-01-31"></label>
     <label class="field">颱風快選<select class="typhoon-pick" data-start="mStart" data-end="mEnd"><option value="">不套用</option></select></label>`;
   }
   populateTyphoonSelects();

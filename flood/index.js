@@ -6,7 +6,7 @@ window.FLOOD_INDEX = {
   "file": "flood_24h_200.js",
   "n": 1178,
   "pts": 409584,
-  "sizeMB": 3.17,
+  "sizeMB": 3.55,
   "areaKm2": 191.8,
   "date": "20220812",
   "byClass": {
@@ -23,7 +23,7 @@ window.FLOOD_INDEX = {
   "file": "flood_12h_200.js",
   "n": 1312,
   "pts": 579896,
-  "sizeMB": 4.47,
+  "sizeMB": 5.01,
   "areaKm2": 263.2,
   "date": "20220812",
   "byClass": {
@@ -40,7 +40,7 @@ window.FLOOD_INDEX = {
   "file": "flood_12h_300.js",
   "n": 1612,
   "pts": 1246248,
-  "sizeMB": 9.54,
+  "sizeMB": 10.64,
   "areaKm2": 682.6,
   "date": "20220812",
   "byClass": {
@@ -57,7 +57,7 @@ window.FLOOD_INDEX = {
   "file": "flood_12h_400.js",
   "n": 1867,
   "pts": 2010448,
-  "sizeMB": 15.29,
+  "sizeMB": 17.01,
   "areaKm2": 1218.4,
   "date": "20220812",
   "byClass": {
@@ -74,7 +74,7 @@ window.FLOOD_INDEX = {
   "file": "flood_24h_350.js",
   "n": 1645,
   "pts": 1180498,
-  "sizeMB": 9.05,
+  "sizeMB": 10.1,
   "areaKm2": 671.2,
   "date": "20220812",
   "byClass": {
@@ -91,7 +91,7 @@ window.FLOOD_INDEX = {
   "file": "flood_24h_500.js",
   "n": 1922,
   "pts": 2124864,
-  "sizeMB": 16.18,
+  "sizeMB": 17.99,
   "areaKm2": 1356.7,
   "date": "20220812",
   "byClass": {
@@ -108,7 +108,7 @@ window.FLOOD_INDEX = {
   "file": "flood_24h_650.js",
   "n": 2207,
   "pts": 3128862,
-  "sizeMB": 23.68,
+  "sizeMB": 26.26,
   "areaKm2": 2051.7,
   "date": "20220812",
   "byClass": {
@@ -125,7 +125,7 @@ window.FLOOD_INDEX = {
   "file": "flood_6h_150.js",
   "n": 1234,
   "pts": 431973,
-  "sizeMB": 3.32,
+  "sizeMB": 3.73,
   "areaKm2": 163.2,
   "date": "20220812",
   "byClass": {
@@ -142,7 +142,7 @@ window.FLOOD_INDEX = {
   "file": "flood_6h_250.js",
   "n": 1581,
   "pts": 1150983,
-  "sizeMB": 8.8,
+  "sizeMB": 9.83,
   "areaKm2": 563.9,
   "date": "20220812",
   "byClass": {
@@ -159,7 +159,7 @@ window.FLOOD_INDEX = {
   "file": "flood_6h_350.js",
   "n": 1945,
   "pts": 2069733,
-  "sizeMB": 15.7,
+  "sizeMB": 17.49,
   "areaKm2": 1172.5,
   "date": "20220812",
   "byClass": {

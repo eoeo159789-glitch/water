@@ -670,3 +670,12 @@ body.mode-map #mapCanvas { height: calc(100vh - 225px); min-height: 480px; margi
 .flood-popup { font-size: 0.8rem; line-height: 1.55; }
 .flood-popup b { font-size: 0.86rem; }
 .flood-popup-note { margin-top: 4px; font-size: 0.7rem; color: #777; }
+.flood-cls-wrap { margin: 2px 0 8px; }
+.flood-cls-title { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.flood-cls-box { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.flood-cls { display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
+.flood-cls input { margin: 0; }
+.flood-cls-btns { display: inline-flex; gap: 8px; margin-left: 2px; }
+button.linkish { background: none; border: none; padding: 0; font-size: 0.76rem; color: var(--series-1); text-decoration: underline; cursor: pointer; }
+.flood-export { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.flood-popup-sub { color: #777; font-size: 0.72rem; }

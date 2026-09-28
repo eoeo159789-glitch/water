@@ -569,10 +569,30 @@ async function initialMap() {
   document.getElementById("mEnd").value = t.end;
   const pick = document.querySelector("#mapGranInputs select.typhoon-pick");
   if (pick) pick.value = String(i);
+  if (!autoMapOnLoad()) {
+    if (typeof ensureMap === "function") ensureMap();
+    document.getElementById("mapStatus").textContent = "未自動產生雨量圖（可按「產生地圖」繪製）";
+    wraUpdatePlayUi();
+    return;
+  }
   await runMapQuery();
   const st = document.getElementById("mapStatus");
   if (st.textContent) st.textContent = `預設顯示：${t.start.slice(0, 4)} ${t.name_zh}颱風（${t.start}～${t.end}）期間總雨量｜` + st.textContent;
   wraUpdatePlayUi();
+}
+
+function autoMapOnLoad() {
+  try { return localStorage.getItem("hy_auto_map") !== "0"; } catch (e) { return true; }
+}
+// remove the rain / level / discharge map (raster, value markers, legend, CWA official overlay);
+// other layers (flood potential, rivers, counties, station references, projects) stay
+function clearRainMap() {
+  if (typeof wraStopPlay === "function") wraStopPlay(true);
+  if (typeof tyStopPlay === "function") tyStopPlay(true);
+  if (typeof tyOff !== "undefined" && tyOff.overlay && typeof tyClearOfficial === "function") tyClearOfficial();
+  if (typeof leafletMap !== "undefined" && leafletMap) clearMapLayers();
+  if (typeof lastMapRows !== "undefined") lastMapRows = null;
+  document.getElementById("mapStatus").textContent = "已清除雨量圖";
 }
 
 /* ---------- event wiring ---------- */
@@ -644,6 +664,10 @@ document.addEventListener("DOMContentLoaded", () => {
     else runMapQuery();
   });
   document.getElementById("exportMapCsvBtn").addEventListener("click", exportMapCsv);
+  document.getElementById("mapClearBtn").addEventListener("click", clearRainMap);
+  const autoCb = document.getElementById("autoMapOnLoad");
+  autoCb.checked = autoMapOnLoad();
+  autoCb.addEventListener("change", () => { try { localStorage.setItem("hy_auto_map", autoCb.checked ? "1" : "0"); } catch (e) { /* ignore */ } });
 
   document.getElementById("themeToggle").addEventListener("click", () => {
     const cur = document.documentElement.getAttribute("data-theme");

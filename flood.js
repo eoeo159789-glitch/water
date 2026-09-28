@@ -32,7 +32,7 @@ const floodDecoded = new Map();                    // key -> decoded scenario (a
 let FLOOD_OPACITY = 0.7;
 let floodLayer = null;          // FloodCanvasLayer instance (one, reused across scenarios)
 let floodLayerKey = null;       // scenario currently shown
-let floodLayerMinClass = 1;
+let floodClassMask = [false, true, true, true, true, true]; // index = depth class 1..5
 let floodLegendControl = null;
 let floodInControl = false;
 let floodBusy = false;
@@ -102,7 +102,8 @@ function floodDecode(raw) {
   ringStart[nRing] = vi; polyRing[nPoly] = ri;
   // draw order: shallow classes first so deeper ones stay on top where they touch
   const order = Uint32Array.from({ length: nPoly }, (_, i) => i).sort((a, b) => polyClass[a] - polyClass[b]);
-  return { key: raw.key, hours: raw.hours, mm: raw.mm, areaKm2: raw.areaKm2 || {}, feats,
+  const pv = Array.isArray(raw.pv) && raw.pv.length === nPoly ? raw.pv : null; // village per part (see build_flood.py)
+  return { key: raw.key, hours: raw.hours, mm: raw.mm, areaKm2: raw.areaKm2 || {}, feats, pv,
            xy, ringStart, polyRing, polyFeat, polyClass, bbox, order, nPoly, nPt };
 }
 
@@ -139,8 +140,8 @@ function floodPalette32() {
 }
 
 const FloodCanvasLayer = L.Layer.extend({
-  initialize(opts) { L.setOptions(this, opts); this._data = null; this._minClass = 1; },
-  setData(d, minClass) { this._data = d; this._minClass = minClass; if (this._map) this._redraw(); },
+  initialize(opts) { L.setOptions(this, opts); this._data = null; this._mask = floodClassMask; },
+  setData(d, mask) { this._data = d; this._mask = mask.slice(); if (this._map) this._redraw(); },
   setOpacity(v) { if (this._canvas) this._canvas.style.opacity = v; },
   onAdd(map) {
     const pane = map.getPane(this.options.pane) || map.getPane("overlayPane");
@@ -213,7 +214,7 @@ const FloodCanvasLayer = L.Layer.extend({
 
     for (let oi = 0; oi < order.length; oi++) {
       const p = order[oi], c = polyClass[p];
-      if (c < this._minClass) continue;
+      if (!this._mask[c]) continue;
       const b = p * 4;
       if (bbox[b] > vx1 || bbox[b + 2] < vx0 || bbox[b + 1] > vy1 || bbox[b + 3] < vy0) continue;
       drawn++;
@@ -310,7 +311,7 @@ const FloodCanvasLayer = L.Layer.extend({
     const { xy, ringStart, polyRing, polyClass, bbox, order } = d;
     for (let oi = order.length - 1; oi >= 0; oi--) {
       const p = order[oi];
-      if (polyClass[p] < this._minClass) continue;
+      if (!this._mask[polyClass[p]]) continue;
       const b = p * 4;
       if (px < bbox[b] || px > bbox[b + 2] || py < bbox[b + 1] || py > bbox[b + 3]) continue;
       let wind = 0;                                                   // nonzero winding, same rule as drawing
@@ -322,18 +323,25 @@ const FloodCanvasLayer = L.Layer.extend({
           else if (y2 <= py && (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1) < 0) wind--;
         }
       }
-      if (wind !== 0) return d.feats[d.polyFeat[p]];
+      if (wind !== 0) return p;
     }
     return null;
   },
   _onClick(e) {
-    const f = this.hitTest(e.latlng);
-    if (!f) return;
-    const d = this._data, k = FLOOD_CLASS_BY[f.c];
+    const p = this.hitTest(e.latlng);
+    if (p === null) return;
+    const d = this._data, f = d.feats[d.polyFeat[p]], k = FLOOD_CLASS_BY[f.c];
+    const pieces = floodPartVillages(d, p);
+    const vTxt = pieces.length
+      ? pieces.map(x => x.v ? `${escapeHtmlFlood(x.v.county + x.v.town + x.v.name)}` : "（村里界外）").slice(0, 4).join("、")
+        + (pieces.length > 4 ? ` 等 ${pieces.length} 個村里` : "")
+      : `${escapeHtmlFlood(f.city)}${escapeHtmlFlood(f.town)}`;
+    const ll = floodRepPoint(d, p);
     const html = `<div class="flood-popup"><b>淹水潛勢：${k ? k.label : "—"}</b>
       <div>情境：定量降雨 ${d.hours} 小時 ${d.mm} mm</div>
-      <div>${escapeHtmlFlood(f.city)}${escapeHtmlFlood(f.town)}</div>
-      <div>此筆圖徵面積：${f.ha >= 100 ? (f.ha / 100).toFixed(2) + " km²" : f.ha.toFixed(2) + " 公頃"}</div>
+      <div>${vTxt}${pieces.length > 1 ? `<span class="flood-popup-sub">（此塊跨 ${pieces.length} 個村里）</span>` : ""}</div>
+      <div>此塊面積：${floodFmtHa(floodPartAreaM2(d, p) / 1e4)}</div>
+      <div class="flood-popup-sub">代表點：${ll[0].toFixed(5)}, ${ll[1].toFixed(5)}</div>
       <div class="flood-popup-note">資料：經濟部水利署淹水潛勢圖（模擬成果，實際淹水受排水設施、堤防與降雨分布影響，僅供參考）</div></div>`;
     floodPopup = L.popup({ maxWidth: 300 }).setLatLng(e.latlng).setContent(html).openOn(this._map);
   },
@@ -348,7 +356,7 @@ function floodAddLegend(d) {
     const area = d.areaKm2 || {};
     let rows = "";
     FLOOD_CLASSES.slice().reverse().forEach(k => {
-      if (k.c < floodLayerMinClass) return;
+      if (!floodClassMask[k.c]) return;
       const a = area[String(k.c)];
       rows += `<div class="map-legend-row"><span class="map-legend-swatch" style="background:${k.color}"></span>${k.label}${a !== undefined ? `<span class="flood-legend-area">${a.toFixed(1)} km²</span>` : ""}</div>`;
     });
@@ -374,9 +382,8 @@ async function floodShow() {
   if (floodBusy) return;
   if (typeof ensureMap === "function") ensureMap();
   const sel = document.getElementById("floodScenario");
-  const minSel = document.getElementById("floodMinClass");
   const key = sel ? sel.value : "";
-  const minClass = minSel ? parseInt(minSel.value, 10) : 1;
+  floodReadClassMask();
   if (!key) { floodSetStatus("尚未內建任何淹水潛勢資料檔。"); return; }
   floodBusy = true;
   try {
@@ -387,15 +394,17 @@ async function floodShow() {
     }
     const d = await floodGetScenario(key);
     const layer = floodEnsureLayer();
-    floodLayerKey = key; floodLayerMinClass = minClass;
+    floodLayerKey = key;
     if (floodPopup && leafletMap.hasLayer(floodPopup)) leafletMap.closePopup(floodPopup);
     if (!floodInControl && layersControlRef) { layersControlRef.addOverlay(layer, "淹水潛勢圖（水利署）"); floodInControl = true; }
-    layer.setData(d, minClass);
+    layer.setData(d, floodClassMask);
     if (!leafletMap.hasLayer(layer)) layer.addTo(leafletMap);
     floodAddLegend(d);
     floodWireLayerControlSync();
-    const nShown = d.order.reduce((n, p) => n + (d.polyClass[p] >= minClass ? 1 : 0), 0);
-    floodSetStatus(`已顯示 ${nShown.toLocaleString()} 塊淹水範圍（全臺合計 ${Object.entries(d.areaKm2).filter(([c]) => +c >= minClass).reduce((s, [, a]) => s + a, 0).toFixed(1)} km²）；點選色塊可看淹水深度與鄉鎮。`);
+    const nShown = d.order.reduce((n, p) => n + (floodClassMask[d.polyClass[p]] ? 1 : 0), 0);
+    floodSetStatus(nShown
+      ? `已顯示 ${nShown.toLocaleString()} 塊淹水範圍（全臺合計 ${Object.entries(d.areaKm2).filter(([c]) => floodClassMask[+c]).reduce((s, [, a]) => s + a, 0).toFixed(1)} km²）；點選色塊可看淹水深度與所在村里。`
+      : "目前沒有勾選任何淹水深度。");
   } catch (e) {
     console.error(e);
     floodSetStatus("載入失敗：" + e.message + "（請確認 flood 資料夾與網頁放在同一層）");
@@ -453,7 +462,20 @@ function initFloodUI() {
   const cb = document.getElementById("floodShow");
   cb.addEventListener("change", () => { cb.checked ? floodShow() : (floodHide(), floodSetStatus("")); });
   sel.addEventListener("change", () => { if (cb.checked) floodShow(); });
-  document.getElementById("floodMinClass").addEventListener("change", () => { if (cb.checked) floodShow(); });
+  // depth-class checkboxes (multi-select) + all / none shortcuts
+  const clsBox = document.getElementById("floodClassBox");
+  if (clsBox) {
+    clsBox.innerHTML = FLOOD_CLASSES.map(k => `<label class="flood-cls"><input type="checkbox" value="${k.c}" checked><span class="map-legend-swatch" style="background:${k.color}"></span>${k.label}</label>`).join("")
+      + `<span class="flood-cls-btns"><button type="button" class="linkish" data-flood-cls="all">全選</button><button type="button" class="linkish" data-flood-cls="none">全不選</button><button type="button" class="linkish" data-flood-cls="deep">1 m 以上</button></span>`;
+    const onCls = () => { floodReadClassMask(); if (cb.checked) floodShow(); };
+    clsBox.addEventListener("change", onCls);
+    clsBox.addEventListener("click", e => {
+      const b = e.target.closest("button[data-flood-cls]"); if (!b) return;
+      clsBox.querySelectorAll("input[type=checkbox]").forEach(i => { i.checked = b.dataset.floodCls === "all" || (b.dataset.floodCls === "deep" && +i.value >= 3); });
+      onCls();
+    });
+  }
+  floodInitExport();
 
   const op = document.getElementById("opFlood");
   if (op) {
@@ -463,6 +485,212 @@ function initFloodUI() {
   }
   const reset = document.getElementById("opResetBtn");
   if (reset) reset.addEventListener("click", () => { if (op) op.value = 70; applyFloodOpacity(0.7); });
+}
+
+/* ---------- per-part helpers: area, representative point, villages ---------- */
+function floodReadClassMask() {
+  const box = document.getElementById("floodClassBox");
+  if (!box) return floodClassMask;
+  const m = [false, false, false, false, false, false];
+  box.querySelectorAll("input[type=checkbox]").forEach(i => { if (i.checked) m[+i.value] = true; });
+  floodClassMask = m;
+  return m;
+}
+function floodMercToLatLng(x, y) {
+  const lon = x / 256 * 360 - 180;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 256))) * 180 / Math.PI;
+  return [lat, lon];
+}
+function floodFmtHa(ha) { return ha >= 100 ? (ha / 100).toFixed(2) + " km²" : ha.toFixed(2) + " 公頃"; }
+const FLOOD_M_PER_PX0 = 40075016.686 / 256;   // metres per zoom-0 px at the equator
+// polygon area in m² (shoelace in Web Mercator, scaled by cos² of the latitude)
+function floodPartAreaM2(d, p) {
+  const { xy, ringStart, polyRing, bbox } = d;
+  let a = 0;
+  for (let r = polyRing[p]; r < polyRing[p + 1]; r++) {
+    const s = ringStart[r], e = ringStart[r + 1];
+    for (let v = s, w = e - 1; v < e; w = v++) a += xy[w * 2] * xy[v * 2 + 1] - xy[v * 2] * xy[w * 2 + 1];
+  }
+  const lat = floodMercToLatLng(0, (bbox[p * 4 + 1] + bbox[p * 4 + 3]) / 2)[0] * Math.PI / 180;
+  // Web Mercator applies spherical formulas to GRS80 latitudes: ground area = merc area * cos²φ (1-e²) / (1-e² sin²φ)²
+  const e2 = 0.00669438002290, w = 1 - e2 * Math.sin(lat) ** 2;
+  return Math.abs(a) / 2 * FLOOD_M_PER_PX0 * FLOOD_M_PER_PX0 * Math.cos(lat) ** 2 * (1 - e2) / (w * w);
+}
+// a point guaranteed inside the polygon: midpoint of the widest interior span on the bbox's middle row
+function floodRepPoint(d, p) {
+  const { xy, ringStart, polyRing, bbox } = d;
+  const b = p * 4;
+  for (const f of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+    const y = bbox[b + 1] + (bbox[b + 3] - bbox[b + 1]) * f;
+    const xs = [];
+    for (let r = polyRing[p]; r < polyRing[p + 1]; r++) {
+      const s = ringStart[r], e = ringStart[r + 1];
+      for (let v = s, w = e - 1; v < e; w = v++) {
+        const y1 = xy[w * 2 + 1], y2 = xy[v * 2 + 1];
+        if ((y1 <= y) !== (y2 <= y)) xs.push(xy[w * 2] + (y - y1) / (y2 - y1) * (xy[v * 2] - xy[w * 2]));
+      }
+    }
+    xs.sort((a, c) => a - c);
+    let best = -1, bx = 0;
+    for (let i = 0; i + 1 < xs.length; i += 2) if (xs[i + 1] - xs[i] > best) { best = xs[i + 1] - xs[i]; bx = (xs[i] + xs[i + 1]) / 2; }
+    if (best > 0) return floodMercToLatLng(bx, y);
+  }
+  return floodMercToLatLng(xy[ringStart[polyRing[p]] * 2], xy[ringStart[polyRing[p]] * 2 + 1]);
+}
+function floodVillage(vi) {
+  const V = typeof FLOOD_VILLAGES !== "undefined" ? FLOOD_VILLAGES : null;
+  if (!V || vi < 0 || !V.v[vi]) return null;
+  const r = V.v[vi];
+  return { code: r[0], county: V.counties[r[1]], town: V.towns[r[2]], name: r[3] };
+}
+// [{vi, v, m2}] for one part, largest share first; [] if the part has no village information
+function floodPartVillages(d, p) {
+  if (!d.pv) return [];
+  const x = d.pv[p];
+  if (x === -1 || x === undefined) return [];
+  if (typeof x === "number") return [{ vi: x, v: floodVillage(x), m2: null }];
+  const out = [];
+  for (let i = 0; i + 1 < x.length; i += 2) out.push({ vi: x[i], v: floodVillage(x[i]), m2: x[i + 1] });
+  return out.sort((a, b) => b.m2 - a.m2);
+}
+const floodNormName = s => String(s || "").replace(/台/g, "臺");
+
+/* ---------- export: flood-prone locations with depth ---------- */
+function floodInitExport() {
+  const scope = document.getElementById("floodExpScope");
+  if (!scope) return;
+  const cSel = document.getElementById("floodExpCounty"), tSel = document.getElementById("floodExpTown");
+  const V = typeof FLOOD_VILLAGES !== "undefined" ? FLOOD_VILLAGES : null;
+  if (V) {
+    // county order follows village codes (north to south as in the MOI code list)
+    const order = [];
+    V.v.forEach(r => { if (!order.includes(r[1])) order.push(r[1]); });
+    cSel.innerHTML = order.map(ci => `<option value="${escapeHtmlFlood(V.counties[ci])}">${escapeHtmlFlood(V.counties[ci])}</option>`).join("");
+  } else {
+    scope.querySelector('option[value="county"]').disabled = true;
+  }
+  const fillTowns = () => {
+    if (!V) return;
+    const towns = [];
+    V.v.forEach(r => { if (V.counties[r[1]] === cSel.value && !towns.includes(V.towns[r[2]])) towns.push(V.towns[r[2]]); });
+    tSel.innerHTML = `<option value="">全部鄉鎮市區</option>` + towns.map(t => `<option value="${escapeHtmlFlood(t)}">${escapeHtmlFlood(t)}</option>`).join("");
+  };
+  const sync = () => {
+    const isC = scope.value === "county";
+    document.getElementById("floodExpCountyWrap").style.display = isC ? "" : "none";
+    document.getElementById("floodExpTownWrap").style.display = isC ? "" : "none";
+    document.getElementById("floodExpMinWrap").style.display = document.getElementById("floodExpKind").value === "patch" ? "" : "none";
+  };
+  scope.addEventListener("change", sync);
+  document.getElementById("floodExpKind").addEventListener("change", sync);
+  cSel.addEventListener("change", fillTowns);
+  fillTowns(); sync();
+  document.getElementById("floodExpBtn").addEventListener("click", floodExport);
+}
+
+function floodExpMsg(t) { const el = document.getElementById("floodExpMsg"); if (el) el.textContent = t || ""; }
+
+async function floodExport() {
+  const key = document.getElementById("floodScenario").value;
+  if (!key) { floodExpMsg("尚未內建任何情境"); return; }
+  const mask = floodReadClassMask();
+  const classes = FLOOD_CLASSES.filter(k => mask[k.c]);
+  if (!classes.length) { floodExpMsg("請至少勾選一種淹水深度"); return; }
+  const scope = document.getElementById("floodExpScope").value;
+  const kind = document.getElementById("floodExpKind").value;
+  const cName = document.getElementById("floodExpCounty").value, tName = document.getElementById("floodExpTown").value;
+  const minHa = Math.max(0, parseFloat(document.getElementById("floodExpMin").value) || 0);
+  const btn = document.getElementById("floodExpBtn");
+  btn.disabled = true;
+  try {
+    if (!floodDecoded.has(key)) { floodExpMsg("載入情境資料中…"); await new Promise(r => setTimeout(r, 30)); }
+    const d = await floodGetScenario(key);
+    floodExpMsg("整理中…"); await new Promise(r => setTimeout(r, 30));
+    const scen = `定量降雨${d.hours}小時${d.mm}mm`;
+    // view filter (zoom-0 px)
+    let vb = null;
+    if (scope === "view") {
+      if (typeof ensureMap === "function") ensureMap();
+      const b = leafletMap.getBounds();
+      vb = [floodMercX(b.getWest()), floodMercY(b.getNorth()), floodMercX(b.getEast()), floodMercY(b.getSouth())];
+    }
+    const inPlace = (county, town) => scope !== "county" || (floodNormName(county) === cName && (!tName || floodNormName(town) === tName));
+    const { bbox, polyClass, polyFeat, nPoly } = d;
+    const locOf = (p) => {                       // representative point + TWD97 + map link
+      const ll = floodRepPoint(d, p);
+      const xy97 = typeof wgs84ToTwd97 === "function" ? wgs84ToTwd97(ll[0], ll[1]) : ["", ""];
+      return [ll[0].toFixed(6), ll[1].toFixed(6), Math.round(xy97[0]), Math.round(xy97[1]), `https://www.google.com/maps?q=${ll[0].toFixed(6)},${ll[1].toFixed(6)}`];
+    };
+    const unassigned = (f) => ({ county: floodNormName(f.city), town: floodNormName(f.town), name: "（村里界外）", code: "" });
+    let rows, header, fname;
+    if (kind === "village") {
+      const acc = new Map();
+      for (let p = 0; p < nPoly; p++) {
+        const c = polyClass[p]; if (!mask[c]) continue;
+        const b = p * 4;
+        if (vb && (bbox[b] > vb[2] || bbox[b + 2] < vb[0] || bbox[b + 1] > vb[3] || bbox[b + 3] < vb[1])) continue;
+        const f = d.feats[polyFeat[p]];
+        let pieces = floodPartVillages(d, p);
+        const total = floodPartAreaM2(d, p);
+        if (!pieces.length) pieces = [{ vi: -1, v: null, m2: total }];
+        else if (pieces.length === 1) pieces[0].m2 = total;
+        else { const s = pieces.reduce((t, x) => t + x.m2, 0) || 1; pieces.forEach(x => { x.m2 = x.m2 / s * total; }); }
+        pieces.forEach(x => {
+          const v = x.v || unassigned(f);
+          if (!inPlace(v.county, v.town)) return;
+          const k = x.vi >= 0 ? "v" + x.vi : "u" + v.county + v.town;
+          let a = acc.get(k);
+          if (!a) { a = { v, area: [0, 0, 0, 0, 0, 0], n: 0, maxC: 0, best: -1, bestM2: -1 }; acc.set(k, a); }
+          a.area[c] += x.m2; a.n++;
+          if (c > a.maxC || (c === a.maxC && x.m2 > a.bestM2)) { a.maxC = c; a.best = p; a.bestM2 = x.m2; }
+        });
+      }
+      const list = [...acc.values()].sort((a, b) => (a.v.code || "~" + a.v.county + a.v.town).localeCompare(b.v.code || "~" + b.v.county + b.v.town));
+      header = ["情境", "縣市", "鄉鎮市區", "村里", "村里代碼", "最大淹水深度",
+        ...classes.map(k => `${k.label} 面積(公頃)`), "合計淹水面積(公頃)", "淹水塊數",
+        "最深處代表點_緯度", "最深處代表點_經度", "最深處代表點_TWD97_X", "最深處代表點_TWD97_Y", "Google地圖"];
+      rows = list.map(a => {
+        const tot = classes.reduce((t, k) => t + a.area[k.c], 0);
+        return [scen, a.v.county, a.v.town, a.v.name, a.v.code, FLOOD_CLASS_BY[a.maxC].label,
+          ...classes.map(k => a.area[k.c] ? (a.area[k.c] / 1e4).toFixed(2) : ""), (tot / 1e4).toFixed(2), a.n, ...locOf(a.best)];
+      });
+      fname = "村里彙總";
+    } else {
+      const items = [];
+      for (let p = 0; p < nPoly; p++) {
+        const c = polyClass[p]; if (!mask[c]) continue;
+        const b = p * 4;
+        if (vb && (bbox[b] > vb[2] || bbox[b + 2] < vb[0] || bbox[b + 1] > vb[3] || bbox[b + 3] < vb[1])) continue;
+        const m2 = floodPartAreaM2(d, p);
+        if (m2 / 1e4 < minHa) continue;
+        const f = d.feats[polyFeat[p]];
+        const pieces = floodPartVillages(d, p);
+        const v = (pieces[0] && pieces[0].v) || unassigned(f);
+        if (!inPlace(v.county, v.town)) continue;
+        items.push({ p, c, m2, v, f, pieces });
+      }
+      items.sort((a, b) => (a.v.code || "~").localeCompare(b.v.code || "~") || b.c - a.c || b.m2 - a.m2);
+      header = ["情境", "縣市", "鄉鎮市區", "村里（面積最大者）", "村里代碼", "淹水深度", "面積(公頃)", "跨村里（各村里面積，公頃）",
+        "代表點_緯度", "代表點_經度", "代表點_TWD97_X", "代表點_TWD97_Y", "Google地圖", "水利署圖資標示縣市", "水利署圖資標示鄉鎮"];
+      rows = items.map(it => {
+        const tot = it.pieces.reduce((t, x) => t + (x.m2 || 0), 0) || 1;
+        const cross = it.pieces.length > 1 ? it.pieces.map(x => `${x.v ? x.v.town + x.v.name : "村里界外"} ${(x.m2 / tot * it.m2 / 1e4).toFixed(2)}`).join("；") : "";
+        return [scen, it.v.county, it.v.town, it.v.name, it.v.code, FLOOD_CLASS_BY[it.c].label, (it.m2 / 1e4).toFixed(2), cross,
+          ...locOf(it.p), floodNormName(it.f.city), floodNormName(it.f.town)];
+      });
+      fname = `逐塊明細${minHa ? "_" + minHa + "公頃以上" : ""}`;
+    }
+    if (!rows.length) { floodExpMsg("此範圍沒有符合條件的淹水區域"); return; }
+    const where = scope === "view" ? "目前畫面" : scope === "county" ? cName + (tName || "") : "全臺";
+    const depthTag = classes.length === FLOOD_CLASSES.length ? "全部深度" : classes.map(k => k.label.replace(/ /g, "")).join("+");
+    downloadCsv(`淹水潛勢_${d.hours}h${d.mm}mm_${fname}_${where}_${depthTag}.csv`, [header, ...rows]);
+    floodExpMsg(`已匯出 ${rows.length.toLocaleString()} 列`);
+  } catch (e) {
+    console.error(e);
+    floodExpMsg("匯出失敗：" + e.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 document.addEventListener("DOMContentLoaded", initFloodUI);

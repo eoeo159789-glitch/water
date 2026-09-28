@@ -237,9 +237,11 @@
       <div class="row">
         <button class="primary" id="mapQueryBtn" type="button">產生地圖</button>
         <button class="ghost" id="exportMapCsvBtn" type="button">匯出 CSV</button>
+        <button class="ghost" id="mapClearBtn" type="button" title="移除雨量／水位／流量內插圖、測站數值標記與圖例；淹水潛勢、河川、縣市界等圖層不受影響">清除雨量圖</button>
         <label class="check-row dots-toggle" title="只影響雨量圖上的白色測站點；水位／流量圖的測站點即為資料本身，不受影響"><input type="checkbox" id="showDots" checked> 顯示雨量測站白點</label>
         <span class="badge" id="mapStatus"></span>
       </div>
+      <label class="check-row" style="margin:-4px 0 8px;"><input type="checkbox" id="autoMapOnLoad" checked> 開啟網頁時自動顯示預設雨量圖（取消勾選後，下次開啟只顯示空白底圖；設定存在這台電腦的瀏覽器）</label>
       <details class="color-scale-editor" id="mapNote"><summary>地圖說明</summary><p class="empty-note" style="padding:4px 0;text-align:left;margin:0;">
         雨量：以反距離加權（IDW）內插繪製類似中央氣象署雨量圖的分級色塊（配色對照中央氣象署定量降水預報圖）；水位／流量為逐點量測，沿線數值不具面狀連續性，故不內插，改以測站位置＋顏色/大小標示數值。底圖、河川水系、縣市界、以及雨量站／水位站／流量站位置參考圖層，皆可從地圖右上角圖層控制項開關；OpenStreetMap 電子地圖與正射影像為線上圖磚，需連線才會顯示，離線時請維持「無底圖」。地圖左上角另有全螢幕按鈕，可放大檢視。
       </p></details>
@@ -251,13 +253,11 @@
         </div>
         <div class="row">
           <label class="field">降雨情境<select id="floodScenario"></select></label>
-          <label class="field">顯示深度<select id="floodMinClass">
-            <option value="1">全部（0.3 m 以上）</option>
-            <option value="2">0.5 m 以上</option>
-            <option value="3">1.0 m 以上</option>
-            <option value="4">2.0 m 以上</option>
-            <option value="5">3.0 m 以上</option>
-          </select></label>
+
+        </div>
+        <div class="flood-cls-wrap">
+          <span class="flood-cls-title">顯示深度（可複選）</span>
+          <div class="flood-cls-box" id="floodClassBox"></div>
         </div>
         <div class="op-row">
           <span class="op-lbl">淹水潛勢透明度</span>
@@ -265,8 +265,32 @@
           <span class="op-val" id="opFloodVal">70%</span>
         </div>
         <p class="loc-status" id="floodStatus"></p>
+        <div class="flood-export">
+          <div class="flood-cls-title">匯出淹水區域位置與深度（CSV）</div>
+          <div class="row">
+            <label class="field">範圍<select id="floodExpScope">
+              <option value="all">全臺</option>
+              <option value="view">目前地圖畫面</option>
+              <option value="county">指定縣市／鄉鎮市區</option>
+            </select></label>
+            <label class="field" id="floodExpCountyWrap" style="display:none;">縣市<select id="floodExpCounty"></select></label>
+            <label class="field" id="floodExpTownWrap" style="display:none;">鄉鎮市區<select id="floodExpTown"></select></label>
+          </div>
+          <div class="row">
+            <label class="field">內容<select id="floodExpKind">
+              <option value="village">依村里彙總（每村里一列，各深度面積分欄）</option>
+              <option value="patch">逐塊明細（每塊淹水範圍一列，含座標）</option>
+            </select></label>
+            <label class="field" id="floodExpMinWrap" style="display:none;">最小面積（公頃）<input type="number" id="floodExpMin" value="0.5" min="0" step="0.1" style="width:90px;"></label>
+          </div>
+          <div class="row">
+            <button class="ghost" id="floodExpBtn" type="button">⬇ 匯出淹水區域 CSV</button>
+            <span class="badge" id="floodExpMsg"></span>
+          </div>
+          <p class="empty-note" style="padding:0;text-align:left;margin:0;">匯出上方選定的降雨情境與勾選的深度。村里依內政部村里界（2021 年 9 月版）套疊判定，跨村里的淹水範圍依面積分配；每列附代表點經緯度、TWD97 座標與 Google 地圖連結（代表點位於淹水範圍內，可據以查詢門牌地址）。</p>
+        </div>
         <p class="empty-note" style="padding:0;text-align:left;margin:2px 0 0;">
-          <span id="floodAvail"></span>經濟部水利署淹水潛勢圖，全臺「定量降雨」情境（假設在指定延時內降下該總雨量時，可能淹水 0.3 m 以上的範圍與深度），已由 TWD97 轉為經緯度並輕度簡化（容許誤差 5 m）。資料檔已內建、離線可用，勾選時才載入。可與上方雨量內插圖或颱風事件雨量疊合比對；點選色塊可看深度分級與所在鄉鎮。潛勢圖為模擬結果，實際淹水仍受排水設施、堤防與降雨時空分布影響，僅供參考。
+          <span id="floodAvail"></span>經濟部水利署淹水潛勢圖，全臺「定量降雨」情境（假設在指定延時內降下該總雨量時，可能淹水 0.3 m 以上的範圍與深度），已由 TWD97 轉為經緯度並輕度簡化（容許誤差 5 m）。資料檔已內建、離線可用，勾選時才載入。可與上方雨量內插圖或颱風事件雨量疊合比對；點選色塊可看深度分級與所在村里。潛勢圖為模擬結果，實際淹水仍受排水設施、堤防與降雨時空分布影響，僅供參考。
         </p>
       </details>
 
@@ -379,7 +403,7 @@
   </section>
 
   <p class="footer-note">
-    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。地圖「定位」：座標、測站名稱、縣市名稱離線可用；門牌地址查詢使用 OpenStreetMap（Nominatim）地址服務，需連線，查得位置請自行核對。TWD67 座標以常用經驗公式轉換為 TWD97（誤差約 2 公尺）。颱風事件雨量資料來源為中央氣象署颱風資料庫（rdc28.cwa.gov.tw/TDB）雨量統計，時間為該小時結束時間；資料庫只列時雨量 ≥0.1 mm 的小時，缺漏小時視為 0；早年（約 1990 年代以前）僅有少數人工測站，雨量圖為粗略推估；資料庫現行測站清單不含已撤站的舊站。「警戒值設定」與「治理工程點位」只儲存在這台電腦的瀏覽器（清除瀏覽器資料會一併清除），不會上傳；官方警戒水位請依各河川分署公告自行填入。淹水潛勢圖來源為經濟部水利署淹水潛勢圖（定量降雨情境，全臺 shapefile），已轉為經緯度並以 5 公尺容許誤差簡化，內建於 flood 資料夾，勾選時才載入、離線可用；潛勢圖為模擬成果，僅供參考。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
+    說明：「-」或缺測日不計入統計。雨量以「當日累積雨量」為主，水位／流量為「日平均值」，單位分別為公尺（m）與秒立方公尺（cms）。本站主體為離線靜態頁面，所有測站資料、河川水系與縣市界圖資已內嵌於檔案中，可直接於瀏覽器開啟使用、無需連線；僅地圖的「OpenStreetMap 電子地圖」與「正射影像」底圖選項需要連線下載線上圖磚，未連線時請選擇「無底圖」。地圖的圖層透明度設定與全螢幕功能皆為離線可用。地圖「定位」：座標、測站名稱、縣市名稱離線可用；門牌地址查詢使用 OpenStreetMap（Nominatim）地址服務，需連線，查得位置請自行核對。TWD67 座標以常用經驗公式轉換為 TWD97（誤差約 2 公尺）。颱風事件雨量資料來源為中央氣象署颱風資料庫（rdc28.cwa.gov.tw/TDB）雨量統計，時間為該小時結束時間；資料庫只列時雨量 ≥0.1 mm 的小時，缺漏小時視為 0；早年（約 1990 年代以前）僅有少數人工測站，雨量圖為粗略推估；資料庫現行測站清單不含已撤站的舊站。「警戒值設定」與「治理工程點位」只儲存在這台電腦的瀏覽器（清除瀏覽器資料會一併清除），不會上傳；官方警戒水位請依各河川分署公告自行填入。淹水潛勢圖來源為經濟部水利署淹水潛勢圖（定量降雨情境，全臺 shapefile），已轉為經緯度並以 5 公尺容許誤差簡化，內建於 flood 資料夾，勾選時才載入、離線可用；所在村里依內政部村里界（2021 年 9 月版，taiwan-atlas 1:10,000 簡化版）套疊判定，位於村里交界處者可能與實際門牌所屬村里略有出入；潛勢圖為模擬成果，僅供參考。若對解析內容有疑問（例如測站名稱、代碼或數值異常），歡迎回報以便修正。
   </p>
 </div>
 
@@ -399,6 +423,7 @@
 <script src="locate.js"></script>
 <script src="gifexport.js"></script>
 <script src="flood/index.js"></script>
+<script src="flood/villages.js"></script>
 <script src="flood.js"></script>
 </body>
 </html>

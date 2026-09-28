@@ -662,3 +662,11 @@ body.mode-map #mapCanvas { height: calc(100vh - 225px); min-height: 480px; margi
   .ev-st-table td.c-act { position: absolute; top: 6px; right: 8px; width: auto; }
   .ev-locate .table-scroll { overflow: visible; }
 }
+
+/* ---------- 淹水潛勢圖 ---------- */
+.flood-box > summary { font-weight: 600; }
+.flood-legend .flood-legend-area { margin-left: auto; padding-left: 10px; color: var(--text-secondary, #666); font-variant-numeric: tabular-nums; }
+.flood-legend .flood-legend-src { margin-top: 4px; font-size: 0.66rem; color: var(--text-secondary, #666); }
+.flood-popup { font-size: 0.8rem; line-height: 1.55; }
+.flood-popup b { font-size: 0.86rem; }
+.flood-popup-note { margin-top: 4px; font-size: 0.7rem; color: #777; }
